@@ -8,9 +8,10 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { VitePWA } from 'vite-plugin-pwa';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
+const prefix = process.env.PROJECT_PROXY_PREFIX || '/moapp';
 const app_env = {
-  BASE_URL: '/bisheng/workspace',
-  BISHENG_HOST: 'bisheng/build/apps'
+  BASE_URL: `${prefix}/workspace`,
+  BISHENG_HOST: `${(prefix === '/' || prefix === '') ? '' : prefix.replace(/^\//, '') + '/'}build/apps`
 }
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
@@ -28,16 +29,16 @@ export default defineConfig(({ command }) => ({
       //   // target: 'http://localhost:3080',
       //   changeOrigin: true,
       // },
-      '^(/bisheng/workspace)?/bisheng': {
+      [`^(${app_env.BASE_URL})?/bisheng`]: {
         // target: "http://192.168.106.120:3002",
-      target: 'http://10.52.3.75:7860',
+        target: 'http://10.52.3.75:7860',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => {
-          return path.replace(/^\/bisheng\/workspace/, '');
+          return path.replace(new RegExp(`^${app_env.BASE_URL}`), '');
         },
       },
-      '/bisheng/workspace/api': {
+      [`${app_env.BASE_URL}/api`]: {
         // target: 'http://192.168.106.120:3002',
         target: 'http://10.52.3.75:7860',
         changeOrigin: true,
@@ -49,16 +50,16 @@ export default defineConfig(({ command }) => ({
           });
         },
         rewrite: (path) => {
-          return path.replace(/^\/bisheng\/workspace/, '');
+          return path.replace(new RegExp(`^${app_env.BASE_URL}`), '');
         },
       },
-      '/bisheng/workspace/tmp-dir': {
+      [`${app_env.BASE_URL}/tmp-dir`]: {
         // target: 'http://192.168.106.120:3002',
         target: 'http://10.52.3.75:7860',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => {
-          return path.replace(/^\/bisheng\/workspace/, '');
+          return path.replace(new RegExp(`^${app_env.BASE_URL}`), '');
         },
       },
     },

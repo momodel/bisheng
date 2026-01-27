@@ -132,7 +132,7 @@ export default function MainLayout() {
                     <nav className="">
                         {appConfig.benchMenu && (
                             <a
-                                href="/bisheng/workspace/"  // 直接使用根路径
+                                href={`${(__APP_ENV__.BASE_URL === '/' ? '' : __APP_ENV__.BASE_URL) + '/workspace/'}`}  // 直接使用根路径
                                 target="_blank"
                                 className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}
                             >

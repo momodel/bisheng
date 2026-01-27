@@ -49,7 +49,7 @@ const baseConfig = {
 
 const RedirectToExternalLink = () => {
   useEffect(() => {
-    window.location.href = window.location.origin + '/bisheng/workspace/';
+    window.location.href = window.location.origin + (__APP_ENV__.BASE_URL === '/' ? '' : __APP_ENV__.BASE_URL) + '/workspace/';
   }, []);
 
   return null;
