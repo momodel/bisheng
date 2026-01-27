@@ -11,11 +11,12 @@ import svgr from "vite-plugin-svgr";
  * 开启后一般外层网管匹配【custom】时直接透传转到内层网关
  * 内层网关访问 api或者前端静态资源需要去掉【custom】前缀
 */
-const app_env = { BASE_URL: '' } // /custom
+const app_env = { BASE_URL: '/bisheng' } // /custom
 
 // Use environment variable to determine the target.
 //  const target = process.env.VITE_PROXY_TARGET || "http://127.0.0.1:7860";
 const target = process.env.VITE_PROXY_TARGET || "http://192.168.106.120:3002";
+// const target = 'http://10.52.3.75:7860';
 const fileServiceTarget = "http://192.168.106.116:9000";
 
 // 公共代理配置

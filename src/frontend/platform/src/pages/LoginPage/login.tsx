@@ -77,7 +77,7 @@ export const LoginPage = () => {
                     location.href = pathname
                 } else {
                     // 修改为跳转到 Platform 的应用管理页面
-                    location.href = location.pathname === '/' ? location.origin + '/build/apps' : location.href
+                    location.href = location.pathname === '/bisheng/' ? location.origin + '/bisheng/build/apps' : location.href
                 }
                 // location.href = __APP_ENV__.BASE_URL + '/'
             }), (error) => {

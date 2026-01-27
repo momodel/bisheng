@@ -9,8 +9,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 const app_env = {
-  BASE_URL: '/workspace',
-  BISHENG_HOST: 'build/apps'
+  BASE_URL: '/bisheng/workspace',
+  BISHENG_HOST: 'bisheng/build/apps'
 }
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
@@ -28,16 +28,18 @@ export default defineConfig(({ command }) => ({
       //   // target: 'http://localhost:3080',
       //   changeOrigin: true,
       // },
-      '^(/workspace)?/bisheng': {
-        target: "http://192.168.106.120:3002",
+      '^(/bisheng/workspace)?/bisheng': {
+        // target: "http://192.168.106.120:3002",
+      target: 'http://10.52.3.75:7860',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => {
-          return path.replace(/^\/workspace/, '');
+          return path.replace(/^\/bisheng\/workspace/, '');
         },
       },
-      '/workspace/api': {
-        target: 'http://192.168.106.120:3002',
+      '/bisheng/workspace/api': {
+        // target: 'http://192.168.106.120:3002',
+        target: 'http://10.52.3.75:7860',
         changeOrigin: true,
         secure: false,
         ws: true,
@@ -47,15 +49,16 @@ export default defineConfig(({ command }) => ({
           });
         },
         rewrite: (path) => {
-          return path.replace(/^\/workspace/, '');
+          return path.replace(/^\/bisheng\/workspace/, '');
         },
       },
-      '/workspace/tmp-dir': {
-        target: 'http://192.168.106.120:3002',
+      '/bisheng/workspace/tmp-dir': {
+        // target: 'http://192.168.106.120:3002',
+        target: 'http://10.52.3.75:7860',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => {
-          return path.replace(/^\/workspace/, '');
+          return path.replace(/^\/bisheng\/workspace/, '');
         },
       },
     },
