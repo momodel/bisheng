@@ -72,7 +72,10 @@ export default function MainLayout() {
         <div className="bg-background-main w-full h-screen">
             <div className="flex justify-between h-[64px] bg-background-main relative z-[21]">
                 <div className="flex h-9 my-[14px]">
-                    <img src="https://imgbed.momodel.cn/bPageOpt/bisheng-mologo.png" className="w-[48px] h-[24px] ml-[38px] rounded" alt="" />
+                    <Link className="inline-block" to='/'>
+                        {/* @ts-ignore */}
+                        <img src={__APP_ENV__.BASE_URL + '/assets/bisheng/login-logo-small.png'} className="w-[48px] h-[24px] ml-[38px] rounded" alt="" />
+                    </Link>
                 </div>
                 <div>
                     <HeaderMenu />
