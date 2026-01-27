@@ -110,8 +110,7 @@ export default function MainLayout() {
                         </SelectHover>
                         <Separator className="mx-[23px] h-6 border-l my-5 border-[#dddddd]" orientation="vertical" />
                     </div>
-                    <div className="flex items-center h-7 my-4">
-                        {/* @ts-ignore */}
+                    {/* <div className="flex items-center h-7 my-4">
                         <img className="h-7 w-7 rounded-2xl mr-4" src={__APP_ENV__.BASE_URL + '/assets/user.png'} alt="" />
                         <SelectHover
                             triagger={
@@ -122,7 +121,7 @@ export default function MainLayout() {
                             <SelectHoverItem onClick={JumpResetPage}><Lock className="w-4 h-4 mr-1" /><span>{t('menu.changePwd')}</span></SelectHoverItem>
                             <SelectHoverItem onClick={handleLogout}><QuitIcon className="w-4 h-4 mr-1" /><span>{t('menu.logout')}</span></SelectHoverItem>
                         </SelectHover>
-                    </div>
+                    </div> */}
                 </div>
             </div>
             <div className="flex" style={{ height: "calc(100vh - 64px)" }}>
