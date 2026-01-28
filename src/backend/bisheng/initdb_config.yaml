@@ -48,7 +48,7 @@ env:
   # 是否展示前端界面上的github和帮助链接
   show_github_and_help: false
   # 是否开启注册
-  enable_registration: true
+  enable_registration: false
   # 前端上传文件的最大限制，单位MB
   uploaded_files_maximum_size: 50
 
