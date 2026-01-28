@@ -84,3 +84,5 @@ logger_conf:
       rotation: "00:00"
       retention: "3 Days"
       enqueue: ture
+cookie_conf:
+  jwt_token_expire_time: 2592000   # 30 天 = 30 * 24 * 3600

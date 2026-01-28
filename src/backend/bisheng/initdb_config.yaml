@@ -14,12 +14,12 @@ llm_request:
 default_operator:
   # 使用免登录链接的方式需要配置，因为免登录链接相当于不知道用户信息，我们系统会自动把这些行为记录到某个用户头上，这里用来配置该用户的id
   user: 1
-  enable_guest_access: true # 免登录链接是否可访问
+  enable_guest_access: false # 免登录链接是否可访问
 
 # 密码安全相关配置
 password_conf:
   # 密码超过X天必须进行修改, 登录提示重新修改密码。大于0策略才生效
-  password_valid_period: 200
+  password_valid_period: 0
   # 登录错误时间窗口,单位分钟。在错误时间窗口内超过最大错误次数会封禁用户，password_valid_period和login_error_time_window都大于0才生效
   login_error_time_window: 5
   # 最大错误次数，超过后会封禁用户，大于0时生效
@@ -33,7 +33,7 @@ system_login_method:
   admin_username: admin # 从 SSO/LDAP 注册的管理员用户名
 
 # 登陆页面是否需要输入验证码，可设置为True或False
-use_captcha: True
+use_captcha: false
 
 # 会话窗口底部提示文案
 dialog_tips:
@@ -46,7 +46,7 @@ env:
   # websocket_url: 192.168.106.120:3003
   office_url: http://IP:8701 # onlyoffice 组件地址，需要浏览器能直接访问
   # 是否展示前端界面上的github和帮助链接
-  show_github_and_help: true
+  show_github_and_help: false
   # 是否开启注册
   enable_registration: true
   # 前端上传文件的最大限制，单位MB

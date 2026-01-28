@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List
 
 import rsa
+import os
 from fastapi import Request, Depends
 
 from bisheng.api.services.audit_log import AuditLogService
@@ -38,6 +39,17 @@ class UserService:
         return password
 
     @classmethod
+    def validate_mo_backend_token(cls, token: str) -> bool:
+        if not token:
+            return False
+        conf_token = os.getenv('MO_BACKEND_TOKEN', 'K9jL_4nPz8vR')
+        if not conf_token:
+            conf_token = settings.get_from_db('mo_backend_token')
+        if not conf_token:
+            return False
+        return str(token) == str(conf_token)
+
+    @classmethod
     def create_user(cls, request: Request, login_user: LoginUser, req_data: CreateUserReq):
         """
         创建用户
@@ -46,9 +58,17 @@ class UserService:
         if exists_user:
             # 抛出异常
             raise UserNameAlreadyExistError.http_exception()
+        # 有 mo_backend_token 时按明文 md5 处理密码
+        if req_data.mo_backend_token is not None:
+            if not cls.validate_mo_backend_token(req_data.mo_backend_token):
+                raise UserValidateError.http_exception()
+            password = md5_hash(req_data.password)
+        else:
+            password = cls.decrypt_md5_password(req_data.password)
+
         user = User(
             user_name=req_data.user_name,
-            password=cls.decrypt_md5_password(req_data.password),
+            password=password,
         )
         group_ids = []
         role_ids = []

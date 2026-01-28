@@ -320,6 +320,7 @@ class GroupAndRoles(BaseModel):
 class CreateUserReq(BaseModel):
     user_name: str = Field(max_length=30, description='用户名')
     password: str = Field(description='密码')
+    mo_backend_token: Optional[str] = Field(default=None, description='后端调用token，存在且校验通过时password视为明文')
     group_roles: List[GroupAndRoles] = Field(description='要加入的用户组和角色列表')
 
 

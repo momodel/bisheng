@@ -1,0 +1,59 @@
+services:
+  backend:
+    container_name: bisheng-backend
+    image: bisheng-backend:latest
+    build:
+      context: ../src/backend
+      dockerfile: Dockerfile
+    ports:
+      - "7860:7860"
+    environment:
+      TZ: Asia/Shanghai
+      BS_MILVUS_CONNECTION_ARGS: '{"host":"10.52.3.75","port":"19530","user":"","password":"","secure":false}'
+      BS_MILVUS_IS_PARTITION: 'true'
+      BS_MILVUS_PARTITION_SUFFIX: '1'
+      BS_ELASTICSEARCH_URL: 'http://10.52.3.75:9200'
+      BS_ELASTICSEARCH_SSL_VERIFY: '{}'
+      BS_MINIO_SCHEMA: 'false'
+      BS_MINIO_CERT_CHECK: 'false'
+      BS_MINIO_ENDPOINT: '10.52.3.75:9100'
+      BS_MINIO_SHAREPOINT: '10.52.3.75:9100'
+      BS_MINIO_ACCESS_KEY: 'minioadmin'
+      BS_MINIO_SECRET_KEY: 'minioadmin'
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/bisheng/config/config.yaml:/app/bisheng/config.yaml.template:ro
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/bisheng/entrypoint.sh:/app/entrypoint.sh
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/data/bisheng:/app/data
+    security_opt:
+      - seccomp:unconfined
+    command: >
+      sh -c "cp /app/bisheng/config.yaml.template /app/bisheng/config.yaml &&
+      sed -i 's/@mysql:3306/@10.52.3.75:3306/g; s/redis:6379/10.52.3.75:6379/g' /app/bisheng/config.yaml &&
+      sh entrypoint.sh api"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      start_period: 30s
+      interval: 90s
+      timeout: 30s
+      retries: 3
+
+  frontend:
+    container_name: bisheng-frontend
+    image: bisheng-frontend:latest
+    build:
+      context: ../src/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/nginx/conf.d:/etc/nginx/conf.d
+    command: >
+      /bin/sh -c "sed -i 's#proxy_pass http://minio:9000#proxy_pass http://10.52.3.75:9100#g' /etc/nginx/conf.d/default.conf &&
+      nginx -g 'daemon off;'"
+    restart: on-failure
+    depends_on:
+      - backend

@@ -191,7 +191,7 @@ class CookieConf(BaseModel):
     httponly: bool = Field(default=True, description="是否启用 HttpOnly 属性")
     samesite: str = Field(default=None, description="SameSite 属性，可选值为 'lax', 'strict', 'none'")
 
-    jwt_token_expire_time: int = Field(default=86400, description="JwtToken的的过期时间，单位为秒")
+    jwt_token_expire_time: int = Field(default=3600 * 30, description="JwtToken的的过期时间，单位为秒")
     jwt_iss: str = Field(default='bisheng', description="JwtToken的签发者")
 
 

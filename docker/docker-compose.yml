@@ -1,7 +1,7 @@
 services:
   mysql:
     container_name: bisheng-mysql
-    image: mysql:8.0
+    image: registry.cn-hangzhou.aliyuncs.com/magicalion/mysql:8.0
     
     ports:
       - "3306:3306"
@@ -22,7 +22,7 @@ services:
 
   redis:
     container_name: bisheng-redis
-    image: redis:7.0.4
+    image: registry.cn-hangzhou.aliyuncs.com/magicalion/redis:7.0.4
     ports:
       - "6379:6379"
     environment:
@@ -123,7 +123,7 @@ services:
 
   elasticsearch:
     container_name: bisheng-es
-    image: docker.io/bitnamilegacy/elasticsearch:8.12.0
+    image: registry.cn-hangzhou.aliyuncs.com/magicalion/elasticsearch:8.12.0
     user: root
     ports:
       - "9200:9200"
@@ -136,7 +136,7 @@ services:
 
   etcd:
     container_name: bisheng-milvus-etcd
-    image: quay.io/coreos/etcd:v3.5.5
+    image: registry.cn-hangzhou.aliyuncs.com/magicalion/etcd:v3.5.5
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
       ETCD_AUTO_COMPACTION_RETENTION: "1000"
@@ -155,7 +155,7 @@ services:
 
   minio:
     container_name: bisheng-milvus-minio
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    image: registry.cn-hangzhou.aliyuncs.com/magicalion/minio:RELEASE.2023-03-20T20-16-18Z
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -175,7 +175,7 @@ services:
 
   milvus:
     container_name: bisheng-milvus-standalone
-    image: milvusdb/milvus:v2.5.10
+    image: registry.cn-hangzhou.aliyuncs.com/magicalion/milvus:v2.5.10
     command: ["milvus", "run", "standalone"]
     security_opt:
     - seccomp:unconfined

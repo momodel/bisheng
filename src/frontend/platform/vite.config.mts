@@ -11,7 +11,7 @@ import svgr from "vite-plugin-svgr";
  * 开启后一般外层网管匹配【custom】时直接透传转到内层网关
  * 内层网关访问 api或者前端静态资源需要去掉【custom】前缀
 */
-const prefix = process.env.PROJECT_PROXY_PREFIX || '/moapp';
+const prefix = process.env.PROJECT_PROXY_PREFIX || '/mo-agent';
 const app_env = { BASE_URL: prefix } // /custom
 
 // Use environment variable to determine the target.

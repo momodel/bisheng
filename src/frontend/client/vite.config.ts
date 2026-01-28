@@ -8,7 +8,7 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { VitePWA } from 'vite-plugin-pwa';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-const prefix = process.env.PROJECT_PROXY_PREFIX || '/moapp';
+const prefix = process.env.PROJECT_PROXY_PREFIX || '/mo-agent';
 const app_env = {
   BASE_URL: `${prefix}/workspace`,
   BISHENG_HOST: `${(prefix === '/' || prefix === '') ? '' : prefix.replace(/^\//, '') + '/'}build/apps`

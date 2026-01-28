@@ -110,6 +110,41 @@ async def login(*, request: Request, user: UserLogin, auth_jwt: AuthJwt = Depend
     return await UserService.user_login(request, user=user, auth_jwt=auth_jwt)
 
 
+@router.post('/user/mo_login', status_code=200)
+async def mo_login(*,
+                   request: Request,
+                   mo_backend_token: str = Body(embed=True),
+                   user_id: int = Body(embed=True),
+                   auth_jwt: AuthJwt = Depends()):
+    # 校验后端 token
+    if not UserService.validate_mo_backend_token(mo_backend_token):
+        raise UnAuthorizedError.http_exception()
+
+    db_user = await UserDao.aget_user(user_id)
+    if not db_user:
+        raise NotFoundError().http_exception()
+    if db_user.delete == 1:
+        raise UserForbiddenError.http_exception()
+
+    # 生成 access_token
+    access_token = LoginUser.create_access_token(user=db_user, auth_jwt=auth_jwt)
+    LoginUser.set_access_cookies(access_token, auth_jwt=auth_jwt)
+
+    # 写入当前会话 redis
+    redis_client = await get_redis_client()
+    await redis_client.aset(USER_CURRENT_SESSION.format(db_user.user_id), access_token,
+                            auth_jwt.cookie_conf.jwt_token_expire_time + 3600)
+
+    # 审计日志 + Telemetry
+    login_user = await LoginUser.init_login_user(user_id=db_user.user_id, user_name=db_user.user_name)
+    AuditLogService.user_login(login_user, get_request_ip(request))
+    await telemetry_service.log_event(user_id=login_user.user_id, event_type=BaseTelemetryTypeEnum.USER_LOGIN,
+                                      trace_id=trace_id_var.get(),
+                                      event_data=UserLoginEventData(method="mo_backend"))
+
+    return resp_200({'access_token': access_token})
+
+
 @router.get('/user/admin')
 async def get_admins(login_user: LoginUser = Depends(LoginUser.get_login_user)):
     """

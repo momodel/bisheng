@@ -1,4 +1,4 @@
-FROM dataelement/bisheng-backend:base.v8
+FROM registry.cn-hangzhou.aliyuncs.com/magicalion/bisheng-backend:base.v8
 
 WORKDIR /app
 
