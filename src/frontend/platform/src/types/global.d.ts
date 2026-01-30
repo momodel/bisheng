@@ -6,6 +6,10 @@ declare global {
         errorAlerts: (errorList: string[]) => void
         _flow: any
     }
+
+    const __APP_ENV__: {
+        BASE_URL: string;
+    };
 }
 
 declare module "*.png" {

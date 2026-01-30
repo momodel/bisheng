@@ -1,5 +1,5 @@
 {
-  "title": "BISHENG",
+  "title": "Mo Intelligent Agent Training Platform",
   "prompt": "Confirmation",
   "unsupportedFileType": "Unsupported file types: {{extensions}}",
   "supportedFormatsWithImages": "Supported file formats: pdf (including scanned documents), txt, docx, ppt, pptx, md, html, xls, xlsx, csv, doc, png, jpg, jpeg, bmp; each file supports up to {{maxSize}}MB; pdf supports traceability positioning.",

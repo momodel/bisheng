@@ -29,8 +29,24 @@ export const LoginPage = () => {
 
     // login or register
     const [showLogin, setShowLogin] = useState(true)
+    const [isRedirecting, setIsRedirecting] = useState(false)
 
     useLoginError()
+
+    // 检查登录状态，未登录则跳转到MO平台
+    useEffect(() => {
+        const isLogin = localStorage.getItem('isLogin')
+        if (!isLogin || isLogin !== '1') {
+            // 未登录，显示跳转提示并跳转
+            setIsRedirecting(true)
+            const baseUrl = __APP_ENV__.BASE_URL === '/' ? '' : __APP_ENV__.BASE_URL
+            const redirectUrl = `${window.location.origin}/user/login?redirect_to=${baseUrl}`
+            // 延迟1.5秒后跳转，让用户看到提示信息
+            setTimeout(() => {
+                window.location.href = redirectUrl
+            }, 1500)
+        }
+    }, [])
 
     // captcha
     const captchaRef = useRef(null)
@@ -136,6 +152,28 @@ export const LoginPage = () => {
 
     return <div className='w-full h-full bg-background-dark'>
         <div className='fixed z-10 sm:w-[1280px] w-full sm:h-[720px] h-full translate-x-[-50%] translate-y-[-50%] left-[50%] top-[50%] border rounded-lg shadow-xl overflow-hidden bg-background-login'>
+            {isRedirecting ? (
+                // 跳转提示页面
+                <div className='w-full h-full flex items-center justify-center'>
+                    <div className='text-center'>
+                        <div className='mb-6'>
+                            <img src={__APP_ENV__.BASE_URL + '/assets/bisheng/login-logo-small.png'} className="inline-block w-[48px] h-[24px] dark:hidden" alt="" />
+                            <img src={__APP_ENV__.BASE_URL + '/assets/bisheng/logo-small-dark.png'} className="inline-block w-[114px] h-[36px] dark:w-[124px] dark:pr-[10px] dark:block hidden" alt="" />
+                        </div>
+                        <div className='text-lg text-tx-color font-medium mb-4'>
+                            正在跳转到 MO 平台登录...
+                        </div>
+                        <div className='flex justify-center items-center'>
+                            <svg className="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                // 原登录表单
+                <>
             <div className='w-[420px] h-[704px] m-[8px] hidden sm:block relative z-20'>
                 <img src={__APP_ENV__.BASE_URL + '/assets/bisheng/login-logo-big.png'} alt="logo_picture" className='w-full h-full dark:hidden' />
                 <img src={__APP_ENV__.BASE_URL + '/assets/bisheng/login-logo-dark.png'} alt="logo_picture" className='w-full h-full hidden dark:block' />
@@ -230,6 +268,8 @@ export const LoginPage = () => {
                     </div>
                 </div>
             </div>
+                </>
+            )}
         </div>
     </div>
 };

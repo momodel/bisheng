@@ -12,7 +12,9 @@ import svgr from "vite-plugin-svgr";
  * 内层网关访问 api或者前端静态资源需要去掉【custom】前缀
 */
 const prefix = process.env.PROJECT_PROXY_PREFIX || '/mo-agent';
-const app_env = { BASE_URL: prefix } // /custom
+const app_env = { 
+  BASE_URL: prefix,
+} // /custom
 
 // Use environment variable to determine the target.
 //  const target = process.env.VITE_PROXY_TARGET || "http://127.0.0.1:7860";

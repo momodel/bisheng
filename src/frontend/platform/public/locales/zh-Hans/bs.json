@@ -1,5 +1,5 @@
 {
-  "title": "BISHENG",
+  "title": " Mo智能体实训平台",
   "prompt": "提示",
   "unsupportedFileType": "不支持文件类型: {{extensions}}",
   "supportedFormatsWithImages": "支持的文件格式为 pdf（含扫描件）、txt、docx、ppt、pptx、md、html、xls、xlsx、csv、doc、png、jpg、jpeg、bmp；每个文件最大支持{{maxSize}}mb；pdf支持溯源定位。",
