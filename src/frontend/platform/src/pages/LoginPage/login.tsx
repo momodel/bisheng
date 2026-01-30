@@ -40,7 +40,7 @@ export const LoginPage = () => {
             // 未登录，显示跳转提示并跳转
             setIsRedirecting(true)
             const baseUrl = __APP_ENV__.BASE_URL === '/' ? '' : __APP_ENV__.BASE_URL
-            const redirectUrl = `${window.location.origin}/user/login?redirect_to=${baseUrl}`
+            const redirectUrl = `${window.location.origin}/user/login?redirect_to=${window.location.origin}${baseUrl}/`
             // 延迟1.5秒后跳转，让用户看到提示信息
             setTimeout(() => {
                 window.location.href = redirectUrl
