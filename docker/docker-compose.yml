@@ -1,12 +1,17 @@
 services:
   mysql:
     container_name: bisheng-mysql
-    image: registry.cn-hangzhou.aliyuncs.com/magicalion/mysql:8.0
-    
+    image: cr.dataelem.com/mysql:8.0
+    privileged: true
+    security_opt:
+      - seccomp=unconfined
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: "1234"  # 数据库密码，如果修改需要同步修改bisheng/congfig/config.yaml配置database_url的mysql连接密码
+      MYSQL_ROOT_PASSWORD: "eP4_8M66hvf"  # 数据库密码，如果修改需要同步修改bisheng/congfig/config.yaml配置database_url的mysql连接密码
       MYSQL_DATABASE: bisheng
       TZ: Asia/Shanghai
     volumes:
@@ -22,7 +27,7 @@ services:
 
   redis:
     container_name: bisheng-redis
-    image: registry.cn-hangzhou.aliyuncs.com/magicalion/redis:7.0.4
+    image: cr.dataelem.com/redis:7.0.4
     ports:
       - "6379:6379"
     environment:

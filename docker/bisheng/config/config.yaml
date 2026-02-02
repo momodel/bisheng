@@ -1,7 +1,7 @@
 # 数据库配置， 当前加密串的密码是1234，
 # 密码加密参考 https://dataelem.feishu.cn/wiki/BSCcwKd4Yiot3IkOEC8cxGW7nPc#Gxitd1xEeof1TzxdhINcGS6JnXd
 database_url:
-  "mysql+pymysql://root:gAAAAABlp4b4c59FeVGF_OQRVf6NOUIGdxq8246EBD-b0hdK_jVKRs1x4PoAn0A6C5S6IiFKmWn0Nm5eBUWu-7jxcqw6TiVjQA==@mysql:3306/bisheng?charset=utf8mb4"
+  "mysql+pymysql://root:gAAAAABpgAdm7zO_kY_r0jeo4eFu0Av0rVNyutoHLDH3nCxXfF0FTYSj8iqdYYz1e7TYnyfuc9z8WkrXErm-6g9wwkGagUsfsw==@mysql:3306/bisheng?charset=utf8mb4"
 
 # 缓存配置  redis://[[username]:[password]]@localhost:6379/0
 # 普通模式:
