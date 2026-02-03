@@ -230,7 +230,7 @@ export default function MainLayout() {
         </div>
 
         {/* // mobile */}
-        <div className="fixed w-full h-full top-0 left-0 bg-[rgba(0,0,0,0.4)] sm:hidden text-sm z-50">
+        {/* <div className="fixed w-full h-full top-0 left-0 bg-[rgba(0,0,0,0.4)] sm:hidden text-sm z-50">
             <div className="w-10/12 bg-gray-50 mx-auto mt-[30%] rounded-xl px-4 py-10">
                 <p className=" text-sm text-center">{t('menu.forBestExperience')}</p>
                 {
@@ -244,7 +244,7 @@ export default function MainLayout() {
                     </div>
                 }
             </div>
-        </div>
+        </div> */}
     </div >
 };
 
