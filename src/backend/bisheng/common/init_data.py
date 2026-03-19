@@ -60,14 +60,19 @@ async def init_default_data():
 
                 user = await session.exec(select(User).limit(1))
                 user = user.all()
-                if not user and settings.admin:
+                if not user:
+                    admin_user_name = 'admin'
+                    admin_password = 'Admin@123'
+                    if settings.admin:
+                        admin_user_name = settings.admin.get(
+                            'user_name') or admin_user_name
+                        admin_password = settings.admin.get(
+                            'password') or admin_password
+
                     md5 = hashlib.md5()
-                    md5.update(settings.admin.get('password').encode('utf-8'))
-                    user = User(
-                        user_id=1,
-                        user_name=settings.admin.get('user_name'),
-                        password=md5.hexdigest(),
-                    )
+                    md5.update(admin_password.encode('utf-8'))
+                    user = User(user_id=1, user_name=admin_user_name,
+                                password=md5.hexdigest())
                     session.add(user)
                     await session.commit()
                     await session.refresh(user)
