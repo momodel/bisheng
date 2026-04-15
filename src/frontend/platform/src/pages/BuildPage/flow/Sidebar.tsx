@@ -152,7 +152,7 @@ export default function Sidebar({ dropdown = false, disabledNodes = [], onInitSt
     }
 
     return <div className={`${dropdown ? 'relative' : 'absolute'} max-w-60 z-40 h-full transition-transform ${expand ? 'p-2' : 'py-2 translate-x-[-200px]'}`}>
-        <div className="bg-background rounded-2xl shadow-md h-full p-2">
+        <div className="bg-background rounded-2xl shadow-md h-full p-2 overflow-auto">
             {/* tab */}
             <Tabs defaultValue="base" className="h-full" onValueChange={handleLoadTools}>
                 <div className="flex gap-1">
