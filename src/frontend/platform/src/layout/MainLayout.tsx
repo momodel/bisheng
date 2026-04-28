@@ -70,8 +70,8 @@ export default function MainLayout() {
 
     return <div className="flex">
         <div className="bg-background-main w-full h-screen">
-            <div className="flex justify-between h-[64px] bg-background-main relative z-[21]">
-                <div className="flex h-9 my-[14px]">
+            <div className="flex justify-between h-[64px] bg-background-main relative z-[21] whitespace-nowrap">
+                <div className="flex h-9 my-[14px] shrink-0">
                  <img src={__APP_ENV__.BASE_URL + '/assets/bisheng/login-logo-small.png'} className="w-[48px] h-[24px] ml-[38px] rounded" alt="" />
                 </div>
                 <div>
