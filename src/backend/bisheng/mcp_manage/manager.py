@@ -10,13 +10,7 @@ from bisheng.mcp_manage.constant import McpClientType
 class ClientManager:
 
     @classmethod
-    async def connect_mcp_from_json(cls, client_json: dict | str):
-        """ 获取对应配置下的的mcp连接 """
-        return cls.sync_connect_mcp_from_json(client_json)
-
-    @classmethod
-    def sync_connect_mcp_from_json(cls, client_json: dict | str) -> BaseMcpClient:
-        """ 获取对应配置下的的mcp连接 """
+    def parse_mcp_client_type(cls, client_json: dict | str) -> tuple[McpClientType, dict]:
         if isinstance(client_json, str):
             client_json = json.loads(client_json)
 
@@ -33,17 +27,28 @@ class ClientManager:
             kwargs.pop('description', '')
             client_kwargs = kwargs
             break
+        return client_type, client_kwargs
+
+    @classmethod
+    async def connect_mcp_from_json(cls, client_json: dict | str):
+        """ Get the under the corresponding configurationmcpCONNECT """
+        return cls.sync_connect_mcp_from_json(client_json)
+
+    @classmethod
+    def sync_connect_mcp_from_json(cls, client_json: dict | str) -> BaseMcpClient:
+        """ Get the under the corresponding configurationmcpCONNECT """
+        client_type, client_kwargs = cls.parse_mcp_client_type(client_json)
         return cls.sync_connect_mcp(client_type, **client_kwargs)
 
     @classmethod
     async def connect_mcp(cls, client_type: str, **kwargs) -> BaseMcpClient:
-        """ 获取对应url的mcp连接 """
-        # 初始化对应的client
+        """ Get the mappingurlright of privacymcpCONNECT """
+        # Initialize the correspondingclient
         return cls.sync_connect_mcp(client_type, **kwargs)
 
     @classmethod
     def sync_connect_mcp(cls, client_type: str, **kwargs) -> BaseMcpClient:
-        # 初始化对应的client
+        # Initialize the correspondingclient
         if client_type == McpClientType.SSE.value:
             client = SseClient(**kwargs)
         elif client_type == McpClientType.STDIO.value:

@@ -3,7 +3,7 @@ from typing import List, Optional, Any, Sequence, Union, Dict, Type, Callable, I
 
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
-from langchain_core.messages import BaseMessage, ToolMessage, HumanMessage, BaseMessageChunk
+from langchain_core.messages import BaseMessage, ToolMessage, BaseMessageChunk
 from langchain_core.outputs import ChatResult, ChatGenerationChunk
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
@@ -14,9 +14,9 @@ from typing_extensions import Self
 
 from bisheng.common.errcode.server import NoLlmModelConfigError, LlmModelConfigDeletedError, LlmProviderDeletedError, \
     LlmModelTypeError, LlmModelOfflineError, InitLlmError
-from bisheng.core.ai import CustomChatOllamaWithReasoning, ChatOpenAI, ChatOpenAICompatible, \
-    AzureChatOpenAI, ChatTongyi, ChatZhipuAI, MiniMaxChat, ChatAnthropic, ChatDeepSeek, \
-    MoonshotChat
+from bisheng.core.ai import ChatOllama, ChatOpenAI, ChatOpenAICompatible, \
+    AzureChatOpenAI, ChatZhipuAI, ChatAnthropic, MoonshotChat, ChatVoiceEngine
+from bisheng.core.ai.llm.custom_chat_deepseek import CustomChatDeepSeek
 from bisheng.llm.domain.const import LLMModelType, LLMServerType
 from bisheng.llm.domain.models import LLMServer, LLMModel
 from .base import BishengBase
@@ -26,21 +26,20 @@ from ..utils import wrapper_bisheng_model_limit_check, wrapper_bisheng_model_lim
 
 def _get_user_kwargs(model_config: dict) -> dict:
     user_kwargs = model_config.get('user_kwargs', {})
-    if isinstance(user_kwargs, str):
+    if isinstance(user_kwargs, str) and user_kwargs:
         return json.loads(user_kwargs)
-    return user_kwargs
+    return user_kwargs if user_kwargs else {}
 
 
-# 需要注意初始化参数的优先级。实例化传入的最高 -> 前端界面配置的其次 -> 前端界面的高级参数优先级最低
+# Attention needs to be paid to the priority of the initialization parameters. Instantiation Incoming Highest -> The following configurations of the front-end interface -> Advanced parameters of the front-end interface have the lowest priority
 def _get_ollama_params(params: dict, server_config: dict, model_config: dict) -> dict:
     params['base_url'] = server_config.get('base_url', '').rstrip('/')
     # some bugs
-    params['extract_reasoning'] = False
     params['stream'] = params.pop('streaming', True)
     if params.get('max_tokens'):
         params['num_ctx'] = params.pop('max_tokens', None)
 
-    # 用户高级自定义配置
+    # User advanced custom configuration
     user_kwargs = _get_user_kwargs(model_config)
     user_kwargs.update(params)
     return user_kwargs
@@ -62,7 +61,23 @@ def _get_openai_params(params: dict, server_config: dict, model_config: dict) ->
             'api_key': server_config.get('openai_api_key') or server_config.get('api_key') or "empty",
             'base_url': server_config.get('openai_api_base') or server_config.get('base_url'),
         })
-        params['base_url'] = params['base_url'].rstrip('/')
+        params['base_url'] = params['base_url'].rstrip('/') if params['base_url'] else ""
+    if server_config.get('openai_proxy'):
+        params['openai_proxy'] = server_config.get('openai_proxy')
+    params['stream_usage'] = True
+
+    user_kwargs = _get_user_kwargs(model_config)
+    user_kwargs.update(params)
+    return user_kwargs
+
+
+def _get_deepseek_params(params: dict, server_config: dict, model_config: dict) -> dict:
+    if server_config:
+        params.update({
+            'api_key': server_config.get('openai_api_key') or server_config.get('api_key') or "empty",
+            'api_base': server_config.get('openai_api_base') or server_config.get('base_url'),
+        })
+        params['api_base'] = params['api_base'].rstrip('/')
     if server_config.get('openai_proxy'):
         params['openai_proxy'] = server_config.get('openai_proxy')
     params['stream_usage'] = True
@@ -87,40 +102,18 @@ def _get_azure_openai_params(params: dict, server_config: dict, model_config: di
 
 
 def _get_qwen_params(params: dict, server_config: dict, model_config: dict) -> dict:
-    params['dashscope_api_key'] = server_config.get('openai_api_key', '')
-    params['model_kwargs'] = {
-        'enable_search': model_config.get('enable_web_search', False),
-    }
+    params = _get_openai_params(params, server_config, model_config)
+    params["base_url"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    extra_body = params.pop('extra_body', {}) or params.pop('model_kwargs', {})
+
+    extra_body['enable_search'] = model_config.get('enable_web_search', False)
+
     if params.get("streaming"):
-        params['model_kwargs']['incremental_output'] = True
+        extra_body['incremental_output'] = True
 
-    if params.get('temperature'):
-        params['model_kwargs']['temperature'] = params.pop('temperature')
+    params['extra_body'] = extra_body
 
-    if params.get('max_tokens'):
-        params['model_kwargs']['max_tokens'] = params.pop('max_tokens')
-
-    user_kwargs = _get_user_kwargs(model_config)
-    if user_model_kwargs := user_kwargs.get('model_kwargs'):
-        user_model_kwargs.update(params['model_kwargs'])
-        params['model_kwargs'] = user_model_kwargs
-        user_kwargs.pop('model_kwargs', None)
-    user_kwargs.update(params)
-
-    return user_kwargs
-
-
-def _get_minimax_params(params: dict, server_config: dict, model_config: dict) -> dict:
-    params['minimax_api_key'] = server_config.get('openai_api_key')
-    params['base_url'] = server_config.get('openai_api_base').rstrip('/')
-    if 'max_tokens' not in params:
-        params['max_tokens'] = 2048
-    if '/chat/completions' not in params['base_url']:
-        params['base_url'] = f"{params['base_url']}/chat/completions"
-
-    user_kwargs = _get_user_kwargs(model_config)
-    user_kwargs.update(params)
-    return user_kwargs
+    return params
 
 
 def _get_anthropic_params(params: dict, server_config: dict, model_config: dict) -> dict:
@@ -154,25 +147,25 @@ def _get_spark_params(params: dict, server_config: dict, model_config: dict) -> 
 
 
 _llm_node_type: Dict = {
-    # 开源推理框架
-    LLMServerType.OLLAMA.value: {'client': CustomChatOllamaWithReasoning, 'params_handler': _get_ollama_params},
+    # Open source inference framework
+    LLMServerType.OLLAMA.value: {'client': ChatOllama, 'params_handler': _get_ollama_params},
     LLMServerType.XINFERENCE.value: {'client': ChatOpenAI, 'params_handler': _get_xinference_params},
     LLMServerType.LLAMACPP.value: {'client': ChatOpenAI, 'params_handler': _get_openai_params},
     LLMServerType.VLLM.value: {'client': ChatOpenAICompatible, 'params_handler': _get_openai_params},
 
-    # 官方api服务
+    # OfficalapiSERVICES
     LLMServerType.OPENAI.value: {'client': ChatOpenAICompatible, 'params_handler': _get_openai_params},
     LLMServerType.AZURE_OPENAI.value: {'client': AzureChatOpenAI, 'params_handler': _get_azure_openai_params},
-    LLMServerType.QWEN.value: {'client': ChatTongyi, 'params_handler': _get_qwen_params},
+    LLMServerType.QWEN.value: {'client': ChatOpenAICompatible, 'params_handler': _get_qwen_params},
     LLMServerType.QIAN_FAN.value: {'client': ChatOpenAICompatible, 'params_handler': _get_openai_params},
     LLMServerType.ZHIPU.value: {'client': ChatZhipuAI, 'params_handler': _get_zhipu_params},
-    LLMServerType.MINIMAX.value: {'client': MiniMaxChat, 'params_handler': _get_minimax_params},
+    LLMServerType.MINIMAX.value: {'client': ChatOpenAICompatible, 'params_handler': _get_openai_params},
     LLMServerType.ANTHROPIC.value: {'client': ChatAnthropic, 'params_handler': _get_anthropic_params},
-    LLMServerType.DEEPSEEK.value: {'client': ChatDeepSeek, 'params_handler': _get_openai_params},
+    LLMServerType.DEEPSEEK.value: {'client': CustomChatDeepSeek, 'params_handler': _get_deepseek_params},
     LLMServerType.SPARK.value: {'client': ChatOpenAICompatible, 'params_handler': _get_spark_params},
     LLMServerType.TENCENT.value: {'client': ChatOpenAICompatible, 'params_handler': _get_openai_params},
     LLMServerType.MOONSHOT.value: {'client': MoonshotChat, 'params_handler': _get_openai_params},
-    LLMServerType.VOLCENGINE.value: {'client': ChatOpenAICompatible, 'params_handler': _get_openai_params},
+    LLMServerType.VOLCENGINE.value: {'client': ChatVoiceEngine, 'params_handler': _get_openai_params},
     LLMServerType.SILICON.value: {'client': ChatOpenAICompatible, 'params_handler': _get_openai_params},
     LLMServerType.MIND_IE.value: {'client': ChatOpenAICompatible, 'params_handler': _get_openai_params},
 }
@@ -183,8 +176,8 @@ class BishengLLM(BishengBase, BaseChatModel):
      Use the llm model that has been launched in model management
     """
 
-    streaming: Optional[bool] = Field(default=None, description="是否使用流式输出", alias="stream")
-    temperature: Optional[float] = Field(default=None, description="模型生成的温度")
+    streaming: Optional[bool] = Field(default=None, description="Whether to use streaming output", alias="stream")
+    temperature: Optional[float] = Field(default=None, description="Model Generated Temperature")
 
     llm: Optional[BaseChatModel] = Field(default=None)
 
@@ -199,7 +192,7 @@ class BishengLLM(BishengBase, BaseChatModel):
             raise NoLlmModelConfigError()
 
         if "model_info" in kwargs and "server_info" in kwargs:
-            # 说明是从class method初始化的 不用再次查询数据库
+            # Description is fromclass methodInitialized No need to query the database again
             self._init_client(model_info=kwargs.pop("model_info"), server_info=kwargs.pop("server_info"), **kwargs)
         else:
             model_info, server_info = self.get_model_server_info_sync(self.model_id)
@@ -249,12 +242,12 @@ class BishengLLM(BishengBase, BaseChatModel):
         return params
 
     def _get_default_params(self, server_config: dict, model_config: dict) -> dict:
-        # 优先级最高的参数，因为这些参数是实例化对象时传入的
+        # Highest priority parameters because they are passed in when the object is instantiated
         default_params: Dict[str, Any] = {
             'model': self.model_info.model_name,
         }
 
-        # 实例化时传参了优先级最高，其次用高级配置里的。否则默认为true
+        # The highest priority is passed in the instantiation, followed by the advanced configuration. Otherwise defaults totrue
         if self.streaming is not None:
             default_params['streaming'] = self.streaming
         else:
@@ -315,18 +308,18 @@ class BishengLLM(BishengBase, BaseChatModel):
                                 "name": "$web_search",
                             },
                         })
-        elif self.server_info.type == LLMServerType.QWEN.value:
-            # ChatTongYi 对多模态的入参比较特殊，需要转换以支持
-            user_message = messages[-1]
-            if isinstance(user_message, HumanMessage):
-                if isinstance(user_message.content, list):
-                    for one in user_message.content:
-                        if one.get('type') == 'image' and one.get('data'):
-                            one['type'] = 'image'
-                            one['image'] = f"data:{one.get('mime_type')};{one.get('source_type')},{one.get('data')}"
-                        elif one.get('type') == 'image_url' and one.get('image_url'):
-                            one['type'] = 'image'
-                            one['image'] = one.pop('image_url', {}).get('url')
+        # elif self.server_info.type == LLMServerType.QWEN.value:
+        #     # ChatTongYi The input parameters for multimodality are special and need to be converted to support
+        #     user_message = messages[-1]
+        #     if isinstance(user_message, HumanMessage):
+        #         if isinstance(user_message.content, list):
+        #             for one in user_message.content:
+        #                 if one.get('type') == 'image' and one.get('data'):
+        #                     one['type'] = 'image'
+        #                     one['image'] = f"data:{one.get('mime_type')};{one.get('source_type')},{one.get('data')}"
+        #                 elif one.get('type') == 'image_url' and one.get('image_url'):
+        #                     one['type'] = 'image'
+        #                     one['image'] = one.pop('image_url', {}).get('url')
         return messages, kwargs
 
     @wrapper_bisheng_model_limit_check

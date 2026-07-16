@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException
+import jwt
+from fastapi import APIRouter, Body, HTTPException
 from loguru import logger
 from sqlalchemy import or_
 from sqlmodel import select
 
 from bisheng.api.v1.schemas import resp_200
+from bisheng.common.services.config_service import settings as bisheng_settings
 from bisheng.core.database import get_sync_db_session
 from bisheng.core.storage.minio.minio_manager import get_minio_storage
 from bisheng.database.models.report import Report
@@ -15,6 +17,16 @@ router = APIRouter(prefix='/report', tags=['report'])
 mino_prefix = 'report/'
 
 
+@router.post('/office_token')
+async def get_office_token(payload: dict = Body(...)):
+    """Sign the OnlyOffice editorConfig with JWT secret and return the token."""
+    secret = bisheng_settings.get_from_db('office_jwt_secret') or ''
+    if not secret:
+        return resp_200({'token': ''})
+    token = jwt.encode(payload, secret, algorithm='HS256')
+    return resp_200({'token': token})
+
+
 @router.post('/callback')
 async def callback(data: dict):
     status = data.get('status')
@@ -22,7 +34,7 @@ async def callback(data: dict):
     key = data.get('key')
     logger.debug(f'calback={data}')
     if status in {2, 6}:
-        # 保存回掉
+        # Save Back
         logger.info(f'office_callback url={file_url}')
         file = Requests().get(url=file_url)
         object_name = mino_prefix + key + '.docx'
@@ -30,7 +42,7 @@ async def callback(data: dict):
         await minio_client.put_object(bucket_name=minio_client.bucket,
                                       object_name=object_name, file=file._content,
                                       content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')  # noqa
-        # 重复保存，key 不更新
+        # Duplicate save,key Data Update Error
         with get_sync_db_session() as session:
             db_report = session.exec(
                 select(Report).where(or_(Report.version_key == key,

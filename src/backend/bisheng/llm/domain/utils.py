@@ -13,33 +13,33 @@ from bisheng.common.schemas.telemetry.event_data_schema import ModelInvokeEventD
 from bisheng.common.services import telemetry_service
 from bisheng.core.cache.redis_manager import get_redis_client, get_redis_client_sync
 from bisheng.core.logger import trace_id_var
-from bisheng.llm.domain.const import LLMModelStatus
+from bisheng.llm.domain.const import LLMModelStatus, LLM_CACHE
 
 
 async def bisheng_model_limit_check(self: 'BishengBase'):
     now = datetime.now().strftime("%Y-%m-%d")
     if self.server_info.limit_flag:
-        # 开启了调用次数检查
+        # Number of calls checked
         cache_key = f"model_limit:{now}:{self.server_info.id}"
         redis_client = await get_redis_client()
         use_num = await redis_client.aincr(cache_key)
         if use_num > self.server_info.limit:
-            raise Exception(f'{self.server_info.name}/{self.model_info.model_name} 额度已用完')
+            raise Exception(f'{self.server_info.name}/{self.model_info.model_name} Quota used up')
 
 
 def sync_bisheng_model_limit_check(self: 'BishengBase'):
     now = datetime.now().strftime("%Y-%m-%d")
     if self.server_info.limit_flag:
-        # 开启了调用次数检查
+        # Number of calls checked
         cache_key = f"model_limit:{now}:{self.server_info.id}"
         use_num = get_redis_client_sync().incr(cache_key)
         if use_num > self.server_info.limit:
-            raise Exception(f'{self.server_info.name}/{self.model_info.model_name} 额度已用完')
+            raise Exception(f'{self.server_info.name}/{self.model_info.model_name} Quota used up')
 
 
 def get_token_from_usage(token_usage: Dict[str, Any]) -> tuple[int, int, int, int]:
     """
-    从token_usage字典中获取token使用情况
+    FROMtoken_usageGet in DictionarytokenUsage
     """
     input_token = token_usage.get('input_tokens', 0) or token_usage.get('prompt_tokens', 0)
     output_token = token_usage.get('output_tokens', 0) or token_usage.get('completion_tokens', 0)
@@ -51,28 +51,35 @@ def get_token_from_usage(token_usage: Dict[str, Any]) -> tuple[int, int, int, in
 
 def parse_token_usage(result: Any) -> tuple[int, int, int, int]:
     """
-    解析token使用情况
+    analyzingtokenUsage
     """
     input_token, output_token, cache_token, total_token = 0, 0, 0, 0
     if isinstance(result, ChatResult):
         for generation in result.generations:
-            token_usage = generation.generation_info.get('token_usage', {})
+            token_usage = generation.generation_info.get('token_usage', {}) or generation.message.response_metadata.get(
+                'token_usage', {}) or generation.message.usage_metadata
             tmp1, tmp2, tmp3, tmp4 = get_token_from_usage(token_usage)
             input_token += tmp1
             output_token += tmp2
             cache_token += tmp3
             total_token += tmp4
+    elif isinstance(result, ChatGenerationChunk):
+        token_usage = result.message.response_metadata.get('token_usage', {}) or result.generation_info.get(
+            'token_usage', {}) or result.message.usage_metadata
+        input_token, output_token, cache_token, total_token = get_token_from_usage(token_usage)
+    else:
+        logger.warning(f'unknown result type: {type(result)}')
     return input_token, output_token, cache_token, total_token
 
 
 class TelemetryCallback(BaseCallbackHandler):
     """
-    Telemetry 回调函数
+    Telemetry Slider Callbacks
     """
 
     def __init__(self, start_time: float):
         self.start_time = start_time
-        self.first_token_time: Optional[int] = None
+        self.first_token_time: Optional[int] = 0
 
     def on_llm_new_token(
             self,
@@ -83,14 +90,14 @@ class TelemetryCallback(BaseCallbackHandler):
             parent_run_id: Optional[UUID] = None,
             **kwargs: Any,
     ) -> Any:
-        if self.first_token_time is None:
+        if not self.first_token_time:
             self.first_token_time = int((time.time() - self.start_time) * 1000)
 
 
 def upload_telemetry_log(self: 'BishengBase', start_time: float, end_time: float, first_token_cost_time: int,
                          status: StatusEnum, is_stream: bool = False, result: Any = None):
     """
-    上传埋点日志
+    Upload Buried Point Log
     """
     try:
         logger.debug("start upload model invoke telemetry log")
@@ -133,7 +140,7 @@ def upload_telemetry_log(self: 'BishengBase', start_time: float, end_time: float
 
 def wrapper_bisheng_model_limit_check(func):
     """
-    调用次数检查的装饰器
+    Number of calls to check the decorator
     """
 
     @functools.wraps(func)
@@ -161,7 +168,7 @@ def wrapper_bisheng_model_limit_check(func):
             raise e
         finally:
             end_time = time.time()
-            # 使用线程池异步上传日志，避免阻塞主线程
+            # Avoid blocking the main thread by uploading logs asynchronously using the thread pool
             first_token_cost_time = telemetry_callback.first_token_time if telemetry_callback else 0
             upload_telemetry_log(self, start_time, end_time, first_token_cost_time, telemetry_status, result=result)
             self.sync_update_model_status(status, remark)
@@ -171,7 +178,7 @@ def wrapper_bisheng_model_limit_check(func):
 
 def wrapper_bisheng_model_limit_check_async(func):
     """
-    调用次数检查的装饰器
+    Number of calls to check the decorator
     """
 
     @functools.wraps(func)
@@ -207,7 +214,7 @@ def wrapper_bisheng_model_limit_check_async(func):
 
 def wrapper_bisheng_model_generator(func):
     """
-    调用次数检查的装饰器  装饰同步生成器函数
+    Number of calls to check the decorator  Decorative Synchronization Builder Functions
     """
 
     @functools.wraps(func)
@@ -241,7 +248,7 @@ def wrapper_bisheng_model_generator(func):
 
 def wrapper_bisheng_model_generator_async(func):
     """
-    调用次数检查的装饰器  装饰异步生成器函数
+    Number of calls to check the decorator  Decorative Asynchronous Builder Functions
     """
 
     @functools.wraps(func)
@@ -270,3 +277,53 @@ def wrapper_bisheng_model_generator_async(func):
             await self.update_model_status(status, remark)
 
     return wrapper
+
+
+def wrapper_bisheng_llm_info(key_prefix: str):
+    """
+    LLM Information Cache Decorator
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            unique_id = args[1] if args and len(args) > 1 else kwargs.get('model_id') or kwargs.get('server_id')
+            cache_flag = kwargs.get('cache', False)
+            cache_key = f"{key_prefix}:{unique_id}"
+            if not cache_flag:
+                return func(*args, **kwargs)
+            cache_info = LLM_CACHE.get(cache_key)
+            if cache_info:
+                return cache_info
+            cache_info = func(*args, **kwargs)
+            LLM_CACHE.setdefault(cache_key, cache_info)
+            return cache_info
+
+        return wrapper
+
+    return decorator
+
+
+def wrapper_bisheng_llm_info_async(key_prefix: str):
+    """
+    LLM Information Cache Decorator for Async Functions
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            unique_id = args[1] if args and len(args) > 1 else kwargs.get('model_id') or kwargs.get('server_id')
+            cache_flag = kwargs.get('cache', False)
+            cache_key = f"{key_prefix}:{unique_id}"
+            if not cache_flag:
+                return await func(*args, **kwargs)
+            cache_info = LLM_CACHE.get(cache_key)
+            if cache_info:
+                return cache_info
+            cache_info = await func(*args, **kwargs)
+            LLM_CACHE.setdefault(cache_key, cache_info)
+            return cache_info
+
+        return wrapper
+
+    return decorator

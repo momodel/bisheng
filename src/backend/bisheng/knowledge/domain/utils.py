@@ -1,9 +1,12 @@
 from datetime import datetime
 
+import fitz
+from loguru import logger
+
 from bisheng.knowledge.domain.models.knowledge import MetadataFieldType
 
 
-# 将时间字符串转换为时间戳
+# Convert Time String to Timestamp
 def time_str_to_timestamp(time_str):
     try:
         return int(time_str)
@@ -47,13 +50,13 @@ def time_str_to_timestamp(time_str):
         pass
 
     try:
-        dt = datetime.strptime(time_str, "%Y年%m月%d日 %H:%M:%S")
+        dt = datetime.strptime(time_str, "%Yyear%mMonth%dHarian %H:%M:%S")
         return int(dt.timestamp())
     except:
         raise ValueError("Unsupported time format")
 
 
-# metadata 数据格式转换
+# metadata Data Format Conversion
 def metadata_value_type_convert(value, target_type: MetadataFieldType):
     try:
         if target_type == MetadataFieldType.NUMBER:
@@ -73,3 +76,22 @@ def metadata_value_type_convert(value, target_type: MetadataFieldType):
             raise ValueError("Unsupported target type")
     except Exception as e:
         raise ValueError(f"Failed to convert value '{value}' to type '{target_type}': {e}")
+
+
+def is_pdf_damaged(pdf_path: str) -> bool:
+    """
+    Others PDF Whether the file is corrupt.
+
+    Args:
+        pdf_path (str): PDF Path of file
+
+    Returns:
+        bool: If the file is damaged, go back True; otherwise go back to False。
+    """
+    try:
+        doc = fitz.open(pdf_path)
+        doc.close()
+        return False
+    except Exception as e:
+        logger.error(f"PDF file is damaged: {e}")
+        return True

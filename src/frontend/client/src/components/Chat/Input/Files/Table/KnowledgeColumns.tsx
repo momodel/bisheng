@@ -1,7 +1,7 @@
 import { ArrowUpDown, Database, Download, TrashIcon } from 'lucide-react';
-import { FileSources, FileContext, dataService } from '~/data-provider/data-provider/src';
+import { FileSources, FileContext, dataService } from '~/types/chat';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { TFile } from '~/data-provider/data-provider/src';
+import type { TFile } from '~/types/chat';
 import { Button, Checkbox, OpenAIMinimalIcon, AzureMinimalIcon } from '~/components';
 import ImagePreview from '~/components/Chat/Input/Files/ImagePreview';
 import FilePreview from '~/components/Chat/Input/Files/FilePreview';
@@ -50,11 +50,12 @@ export const getKnowledgeColumns = (
       },
       cell: ({ row }) => {
         const statusTexts = [
-          '', 
-          localize('com_knowledge_processing'), 
-          localize('com_knowledge_success'), 
-          localize('com_knowledge_failed'), 
-          localize('com_knowledge_model_switching')
+          '',
+          localize('com_knowledge_processing'),
+          localize('com_knowledge_success'),
+          localize('com_knowledge_failed'),
+          localize('com_knowledge_model_switching'),
+          localize('com_knowledge_processing'),
         ];
         return statusTexts[row.original.status];
       },

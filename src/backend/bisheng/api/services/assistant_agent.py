@@ -8,19 +8,16 @@ from langchain_core.callbacks import Callbacks
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import BaseTool, Tool
+from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import format_tool_to_openai_tool
 from langgraph.prebuilt import create_react_agent
 from loguru import logger
 
 from bisheng.api.services.assistant_base import AssistantUtils
-from bisheng.api.utils import build_flow_no_yield
-from bisheng.api.v1.schemas import InputRequest
 from bisheng.common.constants.enums.telemetry import ApplicationTypeEnum
 from bisheng.common.errcode.assistant import AssistantModelEmptyError, AssistantModelNotConfigError, \
     AssistantAutoLLMError
 from bisheng.database.models.assistant import Assistant, AssistantLink, AssistantLinkDao
-from bisheng.database.models.flow import FlowDao, FlowStatus
 from bisheng.llm.domain.services import LLMService
 from bisheng.tool.domain.services.executor import ToolExecutor
 from bisheng_langchain.gpts.assistant import ConfigurableAssistant
@@ -32,7 +29,7 @@ from bisheng_langchain.gpts.prompts import ASSISTANT_PROMPT_OPT
 
 
 class AssistantAgent(AssistantUtils):
-    # cohere的模型需要的特殊prompt
+    # cohereThe special needs of the model prompt
     ASSISTANT_PROMPT_COHERE = """{preamble}|<instruct>|Carefully perform the following instructions, in order, starting each with a new line.
     Firstly, You may need to use complex and advanced reasoning to complete your task and answer the question. Think about how you can use the provided tools to answer the question and come up with a high level plan you will execute.
     Write 'Plan:' followed by an initial high level plan of how you will solve the problem including the tools and steps required.
@@ -47,7 +44,7 @@ class AssistantAgent(AssistantUtils):
 
     Additional instructions to note:
     - If the user's question is in Chinese, please answer it in Chinese.
-    - 当问题中有涉及到时间信息时，比如最近6个月、昨天、去年等，你需要用时间工具查询时间信息。
+    - When there is time information involved in a question, such as recently6Months, yesterday, last year, etc., you need to use the time tool to query the time information.
     """  # noqa
 
     def __init__(self, assistant_info: Assistant, chat_id: str, invoke_user_id: int):
@@ -67,7 +64,7 @@ class AssistantAgent(AssistantUtils):
         self.current_agent_executor = None
         self.llm: BaseLanguageModel | None = None
         self.llm_agent_executor = None
-        # 知识库检索相关参数
+        # Knowledge Base Retrieval Related Parameters
         self.knowledge_retriever = {'max_content': 15000, 'sort_by_source_and_index': False}
 
     async def init_assistant(self, callbacks: Callbacks = None):
@@ -76,7 +73,7 @@ class AssistantAgent(AssistantUtils):
         await self.init_agent()
 
     async def init_llm(self):
-        # 获取配置的助手模型列表
+        # Get a list of configured helper models
         assistant_llm = await LLMService.get_assistant_llm()
         if not assistant_llm.llm_list:
             raise AssistantModelEmptyError()
@@ -96,7 +93,7 @@ class AssistantAgent(AssistantUtils):
             'sort_by_source_and_index': default_llm.knowledge_sort_index
         }
 
-        # 初始化llm
+        # Inisialisasillm
         self.llm = await LLMService.get_bisheng_llm(model_id=default_llm.model_id,
                                                     temperature=self.assistant.temperature,
                                                     streaming=default_llm.streaming,
@@ -106,7 +103,7 @@ class AssistantAgent(AssistantUtils):
                                                     user_id=self.invoke_user_id)
 
     async def init_auto_update_llm(self):
-        """ 初始化自动优化prompt等信息的llm实例 """
+        """ Initialize Automatic Optimization prompt and other information.llmInstances """
         assistant_llm = await LLMService.get_assistant_llm()
         if not assistant_llm.auto_llm:
             raise AssistantAutoLLMError()
@@ -120,7 +117,7 @@ class AssistantAgent(AssistantUtils):
                                                     user_id=self.invoke_user_id)
 
     async def init_tools(self, callbacks: Callbacks = None):
-        """通过名称获取tool 列表
+        """Get by nametool Vertical
            tools_name_param:: {name: params}
         """
         links: List[AssistantLink] = await AssistantLinkDao.get_assistant_link(
@@ -143,10 +140,6 @@ class AssistantAgent(AssistantUtils):
                                                         llm=self.llm,
                                                         callbacks=callbacks)
 
-        # flow + knowledge
-        flow_data = FlowDao.get_flow_by_ids([link.flow_id for link in flow_links if link.flow_id])
-        flow_id2data = {flow.id: flow for flow in flow_data}
-
         for link in flow_links:
             knowledge_id = link.knowledge_id
             if knowledge_id:
@@ -154,49 +147,16 @@ class AssistantAgent(AssistantUtils):
                                                                         callbacks=callbacks,
                                                                         **self.knowledge_retriever)
                 tools.append(knowledge_tool)
-            else:
-                tmp_flow_id = link.flow_id
-                one_flow_data = flow_id2data.get(link.flow_id)
-                tool_name = f'flow_{link.flow_id}'
-                if not one_flow_data:
-                    logger.warning('act=init_tools not find flow_id: {}', link.flow_id)
-                    continue
-                if one_flow_data.status != FlowStatus.ONLINE.value:
-                    self.offline_flows.append(tool_name)
-                    logger.warning('act=init_tools not online flow_id: {}', link.flow_id)
-                    continue
-                flow_graph_data = one_flow_data.data
-                tool_description = f'{one_flow_data.name}:{one_flow_data.description}'
-
-                try:
-                    artifacts = {}
-                    graph = await build_flow_no_yield(graph_data=flow_graph_data,
-                                                      artifacts=artifacts,
-                                                      process_file=True,
-                                                      flow_id=tmp_flow_id,
-                                                      chat_id=self.assistant.id)
-                    built_object = await graph.abuild()
-                    logger.info('act=init_flow_tool build_end')
-                    flow_tool = Tool(name=tool_name,
-                                     func=built_object,
-                                     coroutine=built_object.ainvoke,
-                                     description=tool_description,
-                                     args_schema=InputRequest,
-                                     callbacks=callbacks)
-                    tools.append(flow_tool)
-                except Exception as exc:
-                    logger.error(f'Error processing {tmp_flow_id} tweaks: {exc}')
-                    raise Exception(f'Flow Build Error: {exc}')
         self.tools = tools
 
     async def init_agent(self):
         """
-        初始化智能体的agent
+        Initialize agentagent
         """
-        # 引入agent执行参数
+        # Introductionagentexecution parameter
         agent_executor_type = self.llm_agent_executor
         self.current_agent_executor = agent_executor_type
-        # 做转换
+        # Do the Conversion
         agent_executor_type = self.agent_executor_dict.get(agent_executor_type,
                                                            agent_executor_type)
 
@@ -204,25 +164,25 @@ class AssistantAgent(AssistantUtils):
         if getattr(self.llm, 'model_name', '').startswith('command-r'):
             prompt = self.ASSISTANT_PROMPT_COHERE.format(preamble=prompt)
         if self.current_agent_executor == 'ReAct':
-            # 初始化agent
+            # Inisialisasiagent
             self.agent = ConfigurableAssistant(agent_executor_type=agent_executor_type,
                                                tools=self.tools,
                                                llm=self.llm,
                                                assistant_message=prompt)
         else:
-            # function-calling模式，也添加递归限制
+            # function-callingpattern, but also add recursive constraints
             logger.info(f'Creating LangGraph agent with {len(self.tools)} tools, llm type: {type(self.llm)}')
             logger.info(f'LLM streaming capability: {getattr(self.llm, "streaming", "unknown")}')
 
             self.agent = create_react_agent(self.llm, self.tools, prompt=prompt, checkpointer=False)
             logger.info(f'LangGraph agent created: {type(self.agent)}')
 
-            # 为agent添加递归限制配置
+            # areagentAdd Recursive Limit Configuration
             self.agent = self.agent.with_config({'recursion_limit': 100})
             logger.info(f'Agent config applied: recursion_limit=100')
 
     async def optimize_assistant_prompt(self):
-        """ 自动优化生成prompt """
+        """ Automatically optimize generationprompt """
         chain = ({
                      'assistant_name': lambda x: x['assistant_name'],
                      'assistant_description': lambda x: x['assistant_description'],
@@ -239,16 +199,16 @@ class AssistantAgent(AssistantUtils):
         return optimize_assistant_prompt(self.llm, self.assistant.name, self.assistant.desc)
 
     def generate_guide(self, prompt: str):
-        """ 生成开场对话和开场问题 """
+        """ Generate opening dialogue and opening questions """
         return generate_opening_dialog(self.llm, prompt)
 
     def generate_description(self, prompt: str):
-        """ 生成描述对话 """
+        """ Generate description dialog """
         return generate_breif_description(self.llm, prompt)
 
     def choose_tools(self, tool_list: List[Dict[str, str]], prompt: str) -> List[str]:
         """
-         选择工具
+         Choose A Tool
          tool_list: [{name: xxx, description: xxx}]
         """
         tool_list = [
@@ -261,7 +221,7 @@ class AssistantAgent(AssistantUtils):
     async def fake_callback(self, callback: Callbacks):
         if not callback:
             return
-        # 假回调，将已下线的技能回调给前端
+        # False callback to call back skills that are offline to the front-end
         for one in self.offline_flows:
             run_id = uuid.uuid4()
             await callback[0].on_tool_start({
@@ -272,7 +232,7 @@ class AssistantAgent(AssistantUtils):
             await callback[0].on_tool_end(output='flow is offline', name=one, run_id=run_id)
 
     async def record_chat_history(self, message: List[Any]):
-        # 记录助手的聊天历史
+        # Record Assistant Chat History
         if not os.getenv('BISHENG_RECORD_HISTORY'):
             return
         try:
@@ -292,11 +252,11 @@ class AssistantAgent(AssistantUtils):
             logger.error(f'record assistant history error: {str(e)}')
 
     async def trim_messages(self, messages: List[Any]) -> List[Any]:
-        # 获取encoding
+        # Dapatkanencoding
         enc = self.cl100k_base()
 
         def get_finally_message(new_messages: List[Any]) -> List[Any]:
-            # 修剪到只有一条记录则不再处理
+            # No more processing until only one record has been trimmed
             if len(new_messages) == 1:
                 return new_messages
             total_count = 0
@@ -319,7 +279,7 @@ class AssistantAgent(AssistantUtils):
 
     async def run(self, query: str, chat_history: List = None, callback: Callbacks = None) -> List[BaseMessage]:
         """
-        运行智能体对话
+        Run Agent Conversation
         """
         await self.fake_callback(callback)
 
@@ -338,14 +298,14 @@ class AssistantAgent(AssistantUtils):
             result = await self.agent.ainvoke({'messages': inputs}, config=RunnableConfig(callbacks=callback))
             result = result['messages']
 
-        # 记录聊天历史
+        # Record Chat History
         await self.record_chat_history([one.to_json() for one in result])
 
         return result
 
     async def astream(self, query: str, chat_history: List = None, callback: Callbacks = None):
         """
-        运行智能体对话 - 流式版本
+        Run Agent Conversation - Streaming version
         """
         await self.fake_callback(callback)
 
@@ -359,13 +319,13 @@ class AssistantAgent(AssistantUtils):
         inputs = await self.trim_messages(inputs)
 
         if self.current_agent_executor == 'ReAct':
-            # ReAct模式暂时不支持流式，降级到非流式
+            # ReActMode temporarily does not support streaming, downgrade to non streaming
             result = await self.react_run(inputs, callback)
-            # 记录聊天历史
+            # Record Chat History
             await self.record_chat_history([one.to_json() for one in result])
             yield result
         else:
-            # 使用流式调用
+            # Use Streaming Calls
             config = RunnableConfig(callbacks=callback)
             final_messages = []
 
@@ -374,21 +334,21 @@ class AssistantAgent(AssistantUtils):
             chunk_count = 0
 
             try:
-                # 使用messages模式的LangGraph streaming获得token级别的流式输出
+                # UsemessagesPatternedLangGraph streamingattaintokenLevel of Streaming Output
                 async for chunk in self.agent.astream({'messages': inputs}, config=config, stream_mode="messages"):
                     chunk_count += 1
 
-                    # stream_mode="messages" 返回 (message, metadata) 元组
+                    # stream_mode="messages" Return (message, metadata) Meta Group
                     message = None
                     if isinstance(chunk, tuple) and len(chunk) >= 2:
                         message, metadata = chunk[:2]
                     elif hasattr(chunk, 'content'):
-                        # 直接是消息对象
+                        # Directly to the message object
                         message = chunk
 
                     if message:
-                        # stream_mode="messages"返回的是独立chunk，直接使用其内容
-                        final_messages = [message]  # 保存消息用于历史记录
+                        # stream_mode="messages"Returns Independencechunk, use its content directly
+                        final_messages = [message]  # Save message for history
                         yield [message]
 
             except Exception as astream_error:
@@ -400,12 +360,12 @@ class AssistantAgent(AssistantUtils):
             if chunk_count == 0:
                 logger.warning(f'No chunks received from agent.astream()! This indicates a streaming issue.')
 
-            # 记录聊天历史
+            # Record Chat History
             if final_messages:
                 await self.record_chat_history([one.to_json() for one in final_messages])
 
     async def react_run(self, inputs: List, callback: Callbacks = None):
-        """ react 模式的输入和执行 """
+        """ react Mode input and execution """
         result = await self.agent.ainvoke({
             'input': inputs[-1].content,
             'chat_history': inputs[:-1],

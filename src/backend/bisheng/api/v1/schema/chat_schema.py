@@ -20,12 +20,12 @@ class AppChatList(BaseModel):
     like_count: Optional[int] = None
     dislike_count: Optional[int] = None
     copied_count: Optional[int] = None
-    sensitive_status: Optional[int] = None  # 敏感词审查状态
-    user_groups: Optional[List[Any]] = None  # 用户所属的分组
+    sensitive_status: Optional[int] = None  # Sensitive word review status
+    user_groups: Optional[List[Any]] = None  # Groups to which the user belongs
     mark_user: Optional[str] = None
     mark_status: Optional[int] = None
     mark_id: Optional[int] = None
-    messages: Optional[List[dict]] = None  # 会话的所有消息列表数据
+    messages: Optional[List[dict]] = None  # All message list data for the session
 
     @field_validator('user_name', mode='before')
     @classmethod
@@ -44,12 +44,21 @@ class APIAddQAParam(BaseModel):
 class UseKnowledgeBaseParam(BaseModel):
     personal_knowledge_enabled: Optional[bool] = False
     organization_knowledge_ids: Optional[List[int]] = []
+    knowledge_space_ids: Optional[List[int]] = []
 
     @field_validator('organization_knowledge_ids', mode='before')
     @classmethod
     def convert_organization_knowledge_ids(cls, v: Any):
-        if len(v) > 20:
-            raise ValueError('最多只能使用20个组织知识库')
+        if len(v) > 50:
+            raise ValueError('Can only be used up to 50 organization knowledge base')
+
+        return v
+
+    @field_validator('knowledge_space_ids', mode='before')
+    @classmethod
+    def convert_knowledge_space_ids(cls, v: Any):
+        if len(v) > 50:
+            raise ValueError('Can only be used up to 50 knowledge space')
 
         return v
 
@@ -93,6 +102,6 @@ class ChatMessageHistoryResponse(ChatMessageQuery):
                                message_session: MessageSession):
         return [
             cls.model_validate(obj).model_copy(
-                update={"user_name": user_model.user_name, "flow_name": message_session.flow_name}) for obj in
-            chat_messages
+                update={"user_name": user_model.user_name, "flow_name": message_session.flow_name,
+                        "name": message_session.name}) for obj in chat_messages
         ]

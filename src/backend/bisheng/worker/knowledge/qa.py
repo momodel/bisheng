@@ -3,18 +3,18 @@ from typing import List
 from loguru import logger
 from pymilvus import Collection
 
-from bisheng.api.services.knowledge import KnowledgeService
-from bisheng.api.services.knowledge_imp import QA_save_knowledge, decide_vectorstores
+from bisheng.api.services.knowledge_imp import QA_save_knowledge
 from bisheng.common.errcode.knowledge import KnowledgeFileFailedError
+from bisheng.core.ai import FakeEmbeddings
 from bisheng.core.logger import trace_id_var
-from bisheng.interface.embeddings.custom import FakeEmbedding
+from bisheng.knowledge.domain.knowledge_rag import KnowledgeRag
 from bisheng.knowledge.domain.models.knowledge import KnowledgeDao, KnowledgeState
 from bisheng.knowledge.domain.models.knowledge_file import (
     QAKnoweldgeDao, QAKnowledge, QAKnowledgeUpsert, QAStatus,
 )
+from bisheng.knowledge.domain.services.knowledge_service import KnowledgeService
 from bisheng.llm.domain import LLMService
 from bisheng.worker.main import bisheng_celery
-from bisheng_langchain.vectorstores import Milvus, ElasticKeywordsSearch
 
 
 @bisheng_celery.task
@@ -37,10 +37,10 @@ def insert_qa_celery(qa_id: int):
 @bisheng_celery.task
 def copy_qa_knowledge_celery(source_knowledge_id: int, target_knowledge_id: int, login_user_id: int):
     """
-    复制QA知识点
-    :param login_user_id: 登录用户ID
-    :param source_knowledge_id: 源知识点ID
-    :param target_knowledge_id: 目标知识点ID
+    SalinQAkey learning points
+    :param login_user_id: Login userID
+    :param source_knowledge_id: Source Knowledge PointsID
+    :param target_knowledge_id: Target Knowledge PointsID
     :return:
     """
     trace_id_var.set(f'copy_qa_knowledge_{source_knowledge_id}_{target_knowledge_id}')
@@ -56,16 +56,18 @@ def copy_qa_knowledge_celery(source_knowledge_id: int, target_knowledge_id: int,
             logger.info(f"No QA knowledge to copy from knowledge id {source_knowledge_id}.")
             return
 
-        source_milvus: Milvus = decide_vectorstores(source_knowledge.collection_name, "Milvus", FakeEmbedding())
+        source_milvus = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(0, knowledge=source_knowledge,
+                                                                            embeddings=FakeEmbeddings())
 
         # create new collection name for target knowledge
         new_col = Collection(name=target_knowledge.collection_name, schema=source_milvus.col.schema,
                              using=source_milvus.alias,
                              consistency_level=source_milvus.consistency_level)
 
-        target_milvus: Milvus = decide_vectorstores(target_knowledge.collection_name, "Milvus", FakeEmbedding())
+        target_milvus = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(0, knowledge=target_knowledge,
+                                                                            embeddings=FakeEmbeddings())
 
-        # 分批 复制QA知识点 从第一页开始
+        # Batched SalinQAkey learning points Start from the first page
         batch_size = 100
         for page in range((qa_count + batch_size - 1) // batch_size):
             page += 1
@@ -76,7 +78,7 @@ def copy_qa_knowledge_celery(source_knowledge_id: int, target_knowledge_id: int,
             )
             try:
 
-                # 复制QA知识点 批量 插入
+                # SalinQAkey learning points Batch Insert
                 new_qa_list = []
                 for qa in qa_list:
                     qa_dict = qa.model_dump()
@@ -92,7 +94,7 @@ def copy_qa_knowledge_celery(source_knowledge_id: int, target_knowledge_id: int,
 
                 id_mapping = {qa_list[i].id: result[i].id for i in range(len(qa_list))}
 
-                # 复制向量
+                # Copy Vector
                 source_ids = [int(qa.id) for qa in qa_list if qa.status == QAStatus.ENABLED.value]
                 fields = [s.name for s in source_milvus.col.schema.fields if s.name != "pk"]
                 vectors = source_milvus.col.query(
@@ -110,11 +112,8 @@ def copy_qa_knowledge_celery(source_knowledge_id: int, target_knowledge_id: int,
                 logger.info(f"Copied {len(qa_list)} QA knowledge from knowledge id {source_knowledge_id} "
                             f"to knowledge id {target_knowledge_id}.")
 
-                # es 复制
-                es_db = decide_vectorstores(
-                    target_knowledge.index_name, "ElasticKeywordsSearch", FakeEmbedding()
-                )
-
+                # es Salin
+                es_db = KnowledgeRag.init_knowledge_es_vectorstore_sync(knowledge=target_knowledge)
                 es_texts = []
                 es_metadatas = []
                 for vector in vectors:
@@ -139,7 +138,7 @@ def copy_qa_knowledge_celery(source_knowledge_id: int, target_knowledge_id: int,
                     remark=KnowledgeFileFailedError(exception=e).to_json_str()
                 )
 
-        # 全部复制完成 更新状态
+        # All copied Update statuses
 
         target_knowledge.state = KnowledgeState.PUBLISHED.value
         KnowledgeDao.update_state(knowledge_id=source_knowledge.id, state=KnowledgeState.PUBLISHED,
@@ -159,7 +158,7 @@ def copy_qa_knowledge_celery(source_knowledge_id: int, target_knowledge_id: int,
 @bisheng_celery.task
 def rebuild_qa_knowledge_celery(knowledge_id: int, embedding_model_id: int, invoke_user_id: int):
     """
-     重建QA知识库,向量存储
+     RebuildQAThe knowledge base upon,Vector Storage
     :param knowledge_id:
     :param embedding_model_id:
     :param invoke_user_id:
@@ -172,14 +171,12 @@ def rebuild_qa_knowledge_celery(knowledge_id: int, embedding_model_id: int, invo
             logger.error(f"Knowledge with id {knowledge_id} not found.")
             return
 
-        # 删除milvus中对应数据
+        # DeletemilvusCorresponding data in
         KnowledgeService.delete_knowledge_file_in_vector(knowledge=knowledge_info, del_es=False)
 
-        es_db: ElasticKeywordsSearch = decide_vectorstores(
-            knowledge_info.index_name, "ElasticKeywordsSearch", FakeEmbedding()
-        )
+        es_db = KnowledgeRag.init_knowledge_es_vectorstore_sync(knowledge=knowledge_info)
 
-        # 查询es中所有数据 删除
+        # InquiryesAll data in Delete
         es_result = es_db.client.search(body={
             "query": {
                 "term": {
@@ -199,13 +196,14 @@ def rebuild_qa_knowledge_celery(knowledge_id: int, embedding_model_id: int, invo
 
         embeddings = LLMService.get_bisheng_knowledge_embedding_sync(model_id=embedding_model_id,
                                                                      invoke_user_id=invoke_user_id)
-        milvus_db: Milvus = decide_vectorstores(
-            knowledge_info.collection_name, "Milvus", embeddings
-        )
+
+        milvus_db = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(invoke_user_id=invoke_user_id,
+                                                                        knowledge=knowledge_info,
+                                                                        embeddings=embeddings)
 
         knowledge_info.state = KnowledgeState.PUBLISHED.value
 
-        # 分批 重建QA知识库 从第一页开始
+        # Batched RebuildQAThe knowledge base upon Start from the first page
         batch_size = 100
         for page in range((total + batch_size - 1) // batch_size):
             page += 1
@@ -241,7 +239,7 @@ def rebuild_qa_knowledge_celery(knowledge_id: int, embedding_model_id: int, invo
                     metadata.pop("vector", None)
                     metadatas.append(metadata)
 
-                # 插入milvus
+                # Insertmilvus
                 milvus_db.add_texts(texts, metadatas)
 
                 QAKnoweldgeDao.batch_update_status_by_ids(
@@ -264,7 +262,7 @@ def rebuild_qa_knowledge_celery(knowledge_id: int, embedding_model_id: int, invo
         logger.info(f"Finished rebuilding QA knowledge for knowledge id {knowledge_id}.")
     except Exception as e:
         logger.error(f"Error rebuilding QA knowledge for knowledge id {knowledge_id}: {e}")
-        # 删除milvus中对应数据
+        # DeletemilvusCorresponding data in
         KnowledgeService.delete_knowledge_file_in_vector(knowledge=knowledge_info, del_es=False)
 
         knowledge_info.state = KnowledgeState.FAILED.value

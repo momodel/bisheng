@@ -25,7 +25,7 @@ from PIL import Image
 from pptx import Presentation
 from pptx.enum.dml import MSO_COLOR_TYPE, MSO_THEME_COLOR
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
-from pptx.parts.image import Image as PPTXImage
+from pptx.parts.image import Image as PPTXImage, Image
 from pptx.util import lazyproperty
 from rapidfuzz import process as fuze_process
 from tqdm import tqdm
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 picture_count = 0
 
 
-# 自定义Image，解决pptx中部分图片格式不支持的问题
+# CustomizableImageResolvepptxIssue with some image formats not supported in
 class CustomImage(PPTXImage):
     def __init__(self, blob: bytes, filename: str = None):
         super(CustomImage, self).__init__(blob=blob, filename=filename)
@@ -87,8 +87,34 @@ def is_title(shape):
     return False
 
 
+def is_textbox_title(shape):
+    if shape.shape_type != MSO_SHAPE_TYPE.TEXT_BOX or not shape.has_text_frame:
+        return False
+
+    paragraphs = [para for para in shape.text_frame.paragraphs if para.text.strip()]
+    if len(paragraphs) != 1:
+        return False
+
+    text = paragraphs[0].text.strip()
+    if not text or len(text) > 30:
+        return False
+
+    if any(mark in text for mark in ['。', '；', ';', '：', ':']):
+        return False
+
+    runs = [run for run in paragraphs[0].runs if run.text.strip()]
+    if not runs:
+        return False
+
+    is_bold = any(run.font.bold for run in runs)
+    max_font_size = max([(run.font.size.pt if run.font.size else 0) for run in runs], default=0)
+    return is_bold or max_font_size >= 14
+
+
 def is_text_block(config: ConversionConfig, shape):
     if shape.has_text_frame:
+        if shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX and shape.text.strip():
+            return True
         if shape.is_placeholder and shape.placeholder_format.type == PP_PLACEHOLDER.BODY:
             return True
         if len(shape.text) > config.min_block_size:
@@ -154,7 +180,8 @@ def process_title(config: ConversionConfig, shape, slide_idx) -> TitleElement:
             logger.info(f'Title in slide {slide_idx} "{text}" is converted to "{res[0]}" as specified in title file.')
             return TitleElement(content=res[0].strip(), level=config.custom_titles[res[0]])
     else:
-        return TitleElement(content=text.strip(), level=1)
+        level = 2 if is_textbox_title(shape) else 1
+        return TitleElement(content=text.strip(), level=level)
 
 
 def process_text_blocks(config: ConversionConfig, shape, slide_idx) -> List[Union[ListItemElement, ParagraphElement]]:
@@ -202,6 +229,7 @@ def process_picture(config: ConversionConfig, shape, slide_idx) -> Union[ImageEl
     # wmf images, try to convert, if failed, output as original
     try:
         try:
+            from PIL import Image
             Image.open(output_path).save(os.path.splitext(output_path)[0] + '.png')
             return ImageElement(path=os.path.splitext(img_outputter_path)[0] + '.png', width=config.image_width)
         except Exception:  # Image failed, try another
@@ -242,7 +270,7 @@ def ungroup_shapes(shapes) -> List[SlideElement]:
 def process_shapes(config: ConversionConfig, current_shapes, slide_id: int) -> List[SlideElement]:
     results = []
     for shape in current_shapes:
-        if is_title(shape):
+        if is_title(shape) or is_textbox_title(shape):
             results.append(process_title(config, shape, slide_id))
         elif is_text_block(config, shape):
             results.extend(process_text_blocks(config, shape, slide_id))

@@ -2,14 +2,14 @@ import os
 
 from langchain_core.documents import Document
 
-from bisheng.api.services.md_from_docx import handler as docx_handler
-from bisheng.api.services.md_from_excel import handler as excel_handler
-from bisheng.api.services.md_from_html import handler as html_handler
-from bisheng.api.services.md_from_pdf import handler as pdf_handler
-from bisheng.api.services.md_from_pptx import handler as pptx_handler
-from bisheng.api.services.md_post_processing import post_processing
 from bisheng.core.cache.utils import CACHE_DIR
 from bisheng.core.storage.minio.minio_manager import get_minio_storage_sync
+from bisheng.knowledge.rag.pipeline.loader.utils.md_from_docx import handler as docx_handler
+from bisheng.knowledge.rag.pipeline.loader.utils.md_from_excel import handler as excel_handler
+from bisheng.knowledge.rag.pipeline.loader.utils.md_from_html import handler as html_handler
+from bisheng.knowledge.rag.pipeline.loader.utils.md_from_pdf import handler as pdf_handler
+from bisheng.knowledge.rag.pipeline.loader.utils.md_from_pptx import handler as pptx_handler
+from bisheng.knowledge.rag.pipeline.loader.utils.md_post_processing import post_processing
 
 
 def combine_multiple_md_files_to_raw_texts(
@@ -27,7 +27,7 @@ def combine_multiple_md_files_to_raw_texts(
     files = sorted([f for f in os.listdir(path)])
     raw_texts = []
 
-    # 一个文件只对应一个完整的 Document 对象, texts 才是切分后的chunk内容
+    # A file corresponds to only one complete Document Objects, texts It is only after cuttingchunkContents
     documents = [Document(page_content="", metadata={})]
 
     for file_name in files:
@@ -49,7 +49,7 @@ def convert_file_to_md(
         retain_images=True,
 ):
     """
-    处理文件转换的主函数。
+    The main function that handles file conversions.
     Args:
         file_name:
         input_file_name:

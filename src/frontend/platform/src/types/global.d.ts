@@ -10,6 +10,7 @@ declare global {
     const __APP_ENV__: {
         BASE_URL: string;
     };
+    const __VCONSOLE_ENABLED__: boolean;
 }
 
 declare module "*.png" {

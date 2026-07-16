@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Any, Literal
 
 # if TYPE_CHECKING:
 from pydantic import field_validator
-from sqlalchemy import JSON, Column, DateTime, String, or_, text, Text
+from sqlalchemy import JSON, Column, DateTime, String, or_, text, Text, and_
 from sqlmodel import Field, delete, func, select, update, col
 
 from bisheng.common.models.base import SQLModelSerializable
@@ -13,49 +13,68 @@ from bisheng.core.database import get_async_db_session, get_sync_db_session
 from bisheng.database.base import async_get_count, get_count
 
 
-class KnowledgeFileStatus(Enum):
-    PROCESSING = 1  # 处理中
-    SUCCESS = 2  # 成功
-    FAILED = 3  # 解析失败
-    REBUILDING = 4  # 重建中
+class KnowledgeFileStatus(int, Enum):
+    PROCESSING = 1  # Sedang diproses
+    SUCCESS = 2  # Berhasil
+    FAILED = 3  # Parse Failure
+    REBUILDING = 4  # Rebuilding
+    WAITING = 5  # In queue:
+    TIMEOUT = 6  # Super24Hour not parsed, parsing timeout
 
 
 class QAStatus(Enum):
-    DISABLED = 0  # 用户手动关闭QA
-    ENABLED = 1  # 启用成功
-    PROCESSING = 2  # 处理中
-    FAILED = 3  # QA插入向量库失败
+    DISABLED = 0  # User manually closedQA
+    ENABLED = 1  # Enabled
+    PROCESSING = 2  # Sedang diproses
+    FAILED = 3  # QAFailed to insert vector library
 
 
 class ParseType(Enum):
-    LOCAL = 'local'  # 本地模式解析
-    UNS = 'uns'  # uns服务解析，全部转为pdf文件
+    LOCAL = 'local'  # Local mode resolution
+    UNS = 'uns'  # unsService resolution, all converted topdfDoc.
 
-    # 1.3.0之后的枚举，之前的属于就版本解析的文件
-    ETL4LM = 'etl4lm'  # etl4lm服务解析，包含pdf的版式分析
-    UN_ETL4LM = 'un_etl4lm'  # 非etl4lm服务解析，没有bbox内容，只有源文件和md文件
+    # 1.3.0After the enumeration, the previous belongs to the file parsed on the version
+    ETL4LM = 'etl4lm'  # etl4lmService Insights, includingpdfLayout Analysis for
+    UN_ETL4LM = 'un_etl4lm'  # Nonetl4lmService parsing, nobboxContent, only source files andmdDoc.
+    MINERU = 'mineru'
+    PADDLE_OCR = 'paddle_ocr'
+
+
+class FileSource(Enum):
+    UPLOAD = 'upload'  # user upload
+    CHANNEL = 'channel'
+    SPACE_UPLOAD = 'space_upload'
+
+
+class FileType(int, Enum):
+    DIR = 0
+    FILE = 1
 
 
 class KnowledgeFileBase(SQLModelSerializable):
     user_id: Optional[int] = Field(default=None, index=True)
     user_name: Optional[str] = Field(default=None, index=True)
     knowledge_id: int = Field(index=True)
+    thumbnails: Optional[str] = Field(default=None, description='File thumbnails in Stored object name')
     file_name: str = Field(max_length=200, index=True)
-    file_size: Optional[int] = Field(default=None, index=False, description='文件大小，单位为bytes')
+    file_type: int = Field(default=FileType.FILE.value, description='File type. 0: dir; 1: file')
+    file_source: Optional[str] = Field(default=FileSource.UPLOAD.value, description='File source')
+    level: Optional[int] = Field(default=0)
+    file_level_path: Optional[str] = Field(default=None, index=True)
+    abstract: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    file_size: Optional[int] = Field(default=None, index=False, description='File size inbytes')
     md5: Optional[str] = Field(default=None, index=False)
-    parse_type: Optional[str] = Field(default=ParseType.LOCAL.value,
-                                      index=False,
-                                      description='采用什么模式解析的文件')
-    split_rule: Optional[str] = Field(default=None, sa_column=Column(Text), description='采用什么模式解析的文件')
-    bbox_object_name: Optional[str] = Field(default='', description='bbox文件在minio存储的对象名称')
-    status: Optional[int] = Field(default=KnowledgeFileStatus.PROCESSING.value,
-                                  index=False,
-                                  description='1: 解析中；2: 解析成功；3: 解析失败')
-    object_name: Optional[str] = Field(default=None, index=False, description='文件在minio存储的对象名称')
+    parse_type: Optional[str] = Field(default=ParseType.LOCAL.value, index=False,
+                                      description='Files parsed in what mode')
+    split_rule: Optional[str] = Field(default=None, sa_column=Column(Text), description='Files parsed in what mode')
+    preview_file_object_name: Optional[str] = Field(default=None, index=True, description='Preview File Object name')
+    bbox_object_name: Optional[str] = Field(default='', description='bboxFiles inminioStored object name')
+    status: Optional[int] = Field(default=KnowledgeFileStatus.WAITING.value)
+    object_name: Optional[str] = Field(default=None, index=False, description='Files in Stored object name')
     user_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, sa_column=Column(JSON, nullable=True),
-                                                    description='用户自定义的元数据')
+                                                    description='User-defined metadata')
     remark: Optional[str] = Field(default='', sa_column=Column(String(length=4096)))
-    updater_id: Optional[int] = Field(default=None, index=True, description='最后更新用户ID')
+    updater_id: Optional[int] = Field(default=None, index=True, description='Last updated by userID')
     updater_name: Optional[str] = Field(default=None, index=True)
     create_time: Optional[datetime] = Field(default=None, sa_column=Column(
         DateTime, nullable=False, server_default=text('CURRENT_TIMESTAMP')))
@@ -68,9 +87,10 @@ class QAKnowledgeBase(SQLModelSerializable):
     knowledge_id: int = Field(index=True)
     questions: List[str] = Field(index=False)
     answers: str = Field(index=False)
-    source: Optional[int] = Field(default=0, index=False, description='0: 未知 1: 手动；2: 审计, 3: api, 4: 批量导入')
+    source: Optional[int] = Field(default=0, index=False,
+                                  description='0: Unknown 1: Manual2: Audit, 3: api, 4: Batch import')
     status: Optional[int] = Field(default=1, index=False,
-                                  description='1: 开启；0: 关闭，用户手动关闭；2: 处理中；3：插入失败')
+                                  description='1: Activate0: Close, the user manually closes;2: Sedang diproses3Failed to insert')
     extra_meta: Optional[str] = Field(default=None, index=False)
     remark: Optional[str] = Field(default='', sa_column=Column(String(length=4096)))
     create_time: Optional[datetime] = Field(default=None, sa_column=Column(
@@ -120,7 +140,7 @@ class KnowledgeFileCreate(KnowledgeFileBase):
 
 
 class QAKnowledgeUpsert(QAKnowledgeBase):
-    """支持修改"""
+    """Support modification"""
     id: Optional[int] = None
     answers: Optional[List[str] | str] = None
 
@@ -142,7 +162,10 @@ class KnowledgeFileDao(KnowledgeFileBase):
     def get_file_simple_by_knowledge_id(cls, knowledge_id: int, page: int, page_size: int):
         offset = (page - 1) * page_size
         with get_sync_db_session() as session:
-            return session.query(KnowledgeFile.id, KnowledgeFile.object_name).filter(
+            return session.query(KnowledgeFile.id, KnowledgeFile.object_name,
+                                 KnowledgeFile.preview_file_object_name,
+                                 KnowledgeFile.bbox_object_name,
+                                 KnowledgeFile.thumbnails).filter(
                 KnowledgeFile.knowledge_id == knowledge_id).order_by(
                 KnowledgeFile.id.asc()).offset(offset).limit(page_size).all()
 
@@ -153,10 +176,46 @@ class KnowledgeFileDao(KnowledgeFileBase):
                 KnowledgeFile.id)).filter(KnowledgeFile.knowledge_id == knowledge_id).scalar()
 
     @classmethod
+    async def async_count_file_by_knowledge_id(cls, knowledge_id: int):
+        statement = select(func.count()).where(
+            KnowledgeFile.knowledge_id == knowledge_id
+        )
+        async with get_async_db_session() as session:
+            return await session.scalar(statement)
+
+    @classmethod
+    async def async_count_success_files_batch(cls, knowledge_ids: List[int]) -> dict:
+        """Async: Batch count SUCCESS files for multiple knowledge spaces.
+
+        Returns a dict mapping knowledge_id (int) -> success file count.
+        """
+        if not knowledge_ids:
+            return {}
+        statement = (
+            select(KnowledgeFile.knowledge_id, func.count().label('cnt'))
+            .where(
+                KnowledgeFile.knowledge_id.in_(knowledge_ids),
+                KnowledgeFile.file_type == 1,
+                KnowledgeFile.status == KnowledgeFileStatus.SUCCESS.value,
+            )
+            .group_by(KnowledgeFile.knowledge_id)
+        )
+        async with get_async_db_session() as session:
+            rows = (await session.exec(statement)).all()
+        return {row[0]: row[1] for row in rows}
+
+    @classmethod
     def delete_batch(cls, file_ids: List[int]) -> bool:
         with get_sync_db_session() as session:
             session.exec(delete(KnowledgeFile).where(KnowledgeFile.id.in_(file_ids)))
             session.commit()
+            return True
+
+    @classmethod
+    async def adelete_batch(cls, file_ids: List[int]) -> bool:
+        async with get_async_db_session() as session:
+            await session.exec(delete(KnowledgeFile).where(KnowledgeFile.id.in_(file_ids)))
+            await session.commit()
             return True
 
     @classmethod
@@ -166,6 +225,14 @@ class KnowledgeFileDao(KnowledgeFileBase):
             session.commit()
             session.refresh(knowledge_file)
         return knowledge_file
+
+    @classmethod
+    async def aadd_file(cls, knowledge_file: KnowledgeFile) -> KnowledgeFile:
+        async with get_async_db_session() as session:
+            session.add(knowledge_file)
+            await session.commit()
+            await session.refresh(knowledge_file)
+            return knowledge_file
 
     @classmethod
     def update(cls, knowledge_file):
@@ -184,13 +251,31 @@ class KnowledgeFileDao(KnowledgeFileBase):
         return knowledge_file
 
     @classmethod
+    async def async_update_batch(cls, knowledge_files: List[KnowledgeFile]) -> bool:
+        if not knowledge_files:
+            return False
+        async with get_async_db_session() as session:
+            session.add_all(knowledge_files)
+            await session.commit()
+            return True
+
+    @classmethod
     def update_file_status(cls, file_ids: list[int], status: KnowledgeFileStatus, reason: str = None):
-        """ 批量更新文件状态 """
+        """ Batch update file status """
         statement = update(KnowledgeFile).where(KnowledgeFile.id.in_(file_ids)).values(status=status.value,
                                                                                        remark=reason)
         with get_sync_db_session() as session:
             session.exec(statement)
             session.commit()
+
+    @classmethod
+    async def aupdate_file_status(cls, file_ids: list[int], status: KnowledgeFileStatus, reason: str = None):
+        """ Batch update file status """
+        statement = update(KnowledgeFile).where(KnowledgeFile.id.in_(file_ids)).values(status=status.value,
+                                                                                       remark=reason)
+        async with get_async_db_session() as session:
+            await session.exec(statement)
+            await session.commit()
 
     @classmethod
     def get_file_by_condition(cls, knowledge_id: int, md5_: str = None, file_name: str = None):
@@ -228,7 +313,7 @@ class KnowledgeFileDao(KnowledgeFileBase):
             knowledge_files = session.exec(
                 select(KnowledgeFile).where(KnowledgeFile.id.in_(file_ids))).all()
         if not knowledge_files:
-            raise ValueError('文件ID不存在')
+            raise ValueError('Doc.IDDoes not exist')
         return knowledge_files
 
     @classmethod
@@ -239,6 +324,42 @@ class KnowledgeFileDao(KnowledgeFileBase):
             return session.exec(select(KnowledgeFile).where(KnowledgeFile.id.in_(file_ids))).all()
 
     @classmethod
+    async def aget_file_by_ids(cls, file_ids: List[int]) -> List[KnowledgeFile]:
+        if not file_ids:
+            return []
+        stat = select(KnowledgeFile).where(KnowledgeFile.id.in_(file_ids))
+        async with get_async_db_session() as session:
+            return (await session.exec(stat)).all()
+
+    @classmethod
+    def _build_file_filters_statement(cls, statement, file_name: str = None, status: List[int] = None,
+                                      file_ids: List[int] = None, file_level_path: str = None,
+                                      extra_file_ids: List[int] = None,
+                                      *, order_by: str = None, order_field: str = None, order_sort: str = "desc"):
+        and_statement = []
+        if file_name:
+            and_statement.append(KnowledgeFile.file_name.like(f'%{file_name}%'))
+        if status:
+            and_statement.append(KnowledgeFile.status.in_(status))
+        if file_ids:
+            and_statement.append(KnowledgeFile.id.in_(file_ids))
+        if file_level_path:
+            and_statement.append(KnowledgeFile.file_level_path.like(f"{file_level_path}%"))
+        if extra_file_ids:
+            statement = statement.where(or_(KnowledgeFile.id.in_(extra_file_ids), and_(*and_statement)))
+        else:
+            statement = statement.where(*and_statement)
+
+        if order_field and order_sort:
+            from bisheng.knowledge.domain.models.knowledge_space_file import SpaceFileDao
+            statement = statement.order_by(text(SpaceFileDao.order_field_text(order_field, order_sort)))
+        elif order_by == "file_type":
+            statement = statement.order_by(col(KnowledgeFile.file_type).asc())
+        elif order_by == "update_time":
+            statement = statement.order_by(col(KnowledgeFile.update_time).desc())
+        return statement
+
+    @classmethod
     def get_file_by_filters(cls,
                             knowledge_id: int,
                             file_name: str = None,
@@ -247,29 +368,48 @@ class KnowledgeFileDao(KnowledgeFileBase):
                             page_size: int = 0,
                             file_ids: List[int] = None) -> List[KnowledgeFile]:
         statement = select(KnowledgeFile).where(KnowledgeFile.knowledge_id == knowledge_id)
-        if file_name:
-            statement = statement.where(KnowledgeFile.file_name.like(f'%{file_name}%'))
-        if status:
-            statement = statement.where(KnowledgeFile.status.in_(status))
-        if file_ids:
-            statement = statement.where(KnowledgeFile.id.in_(file_ids))
+        statement = cls._build_file_filters_statement(statement, file_name, status, file_ids, order_by="update_time")
         if page and page_size:
             statement = statement.offset((page - 1) * page_size).limit(page_size)
-        statement = statement.order_by(KnowledgeFile.update_time.desc())
         with get_sync_db_session() as session:
             return session.exec(statement).all()
 
     @classmethod
+    async def aget_file_by_filters(cls, knowledge_id: int, file_name: str = None, status: List[int] = None,
+                                   file_ids: List[int] = None, extra_file_ids: List[int] = None,
+                                   file_level_path: str = None, order_by: str = None,
+                                   order_field: str = None, order_sort: str = "desc",
+                                   *, page: int = 0, page_size: int = 0) -> List[KnowledgeFile]:
+        statement = select(KnowledgeFile).where(KnowledgeFile.knowledge_id == knowledge_id)
+        statement = cls._build_file_filters_statement(statement, file_name, status, file_ids, file_level_path,
+                                                      extra_file_ids=extra_file_ids, order_by=order_by,
+                                                      order_field=order_field, order_sort=order_sort)
+        if page and page_size:
+            statement = statement.offset((page - 1) * page_size).limit(page_size)
+        async with get_async_db_session() as session:
+            return (await session.exec(statement)).all()
+
+    @classmethod
+    async def acount_file_by_filters(cls, knowledge_id: int, file_name: str = None, status: List[int] = None,
+                                     file_ids: List[int] = None, extra_file_ids: List[int] = None,
+                                     file_level_path: str = None) -> int:
+        statement = select(func.count()).where(KnowledgeFile.knowledge_id == knowledge_id)
+        statement = cls._build_file_filters_statement(statement, file_name, status, file_ids, file_level_path,
+                                                      extra_file_ids=extra_file_ids)
+        async with get_async_db_session() as session:
+            return await session.scalar(statement)
+
+    @classmethod
     def get_files_by_multiple_status(cls, knowledge_id: int, status_list: List[int]) -> List[KnowledgeFile]:
         """
-        根据知识库ID和状态列表查询文件
+        Based on Knowledge BaseIDand status list query file
         
         Args:
-            knowledge_id: 知识库ID
-            status_list: 状态值列表
+            knowledge_id: The knowledge base uponID
+            status_list: List of status values
             
         Returns:
-            List[KnowledgeFile]: 匹配的文件列表
+            List[KnowledgeFile]: Matching Files List
         """
         statement = select(KnowledgeFile).where(
             KnowledgeFile.knowledge_id == knowledge_id,
@@ -324,11 +464,11 @@ class KnowledgeFileDao(KnowledgeFileBase):
     @classmethod
     def update_status_bulk(cls, file_ids: List[int], status: KnowledgeFileStatus, remark: str = "") -> None:
         """
-        批量更新文件状态
+        Batch update file status
 
         Args:
-            file_ids: 文件ID列表
-            status: 新的状态值
+            file_ids: Doc.IDVertical
+            status: New status value
 
         Returns:
             None
@@ -354,10 +494,10 @@ class KnowledgeFileDao(KnowledgeFileBase):
     def filter_file_by_metadata_fields(cls, knowledge_id: int, logical: Literal["and", "or"],
                                        metadata_filters: List[Dict[str, Dict[str, Any]]]) -> List[int]:
         """
-        根据用户自定义元数据字段过滤知识文件
-        :param knowledge_id: 知识库ID
-        :param logical: 逻辑操作符，支持 "AND" 或 "OR"
-        :param metadata_filters: 用户自定义元数据字段及其对应的值
+        Filter knowledge files based on user-defined metadata fields
+        :param knowledge_id: The knowledge base uponID
+        :param logical: Logical operators, supporting "AND" OR "OR"
+        :param metadata_filters: User-defined metadata fields and their corresponding values
           [{
             field_a: {
                 'comparison': '=',
@@ -370,7 +510,7 @@ class KnowledgeFileDao(KnowledgeFileBase):
                 ]
             }
           }]
-        :return: 符合条件的知识文件ID列表
+        :return: Eligible Knowledge FilesIDVertical
         """
 
         statement = "select id from knowledgefile where knowledge_id = :knowledge_id and "
@@ -411,10 +551,10 @@ class KnowledgeFileDao(KnowledgeFileBase):
     @classmethod
     def update_file_updater(cls, file_id: int, updater_id: int, updater_name: str) -> None:
         """
-        更新知识文件的更新者信息
-        :param file_id: 知识文件ID
-        :param updater_id: 更新者用户ID
-        :param updater_name: 更新者用户名
+        Update Knowledge File Updater Information
+        :param file_id: Knowledge DocumentsID
+        :param updater_id: User who updated  ID
+        :param updater_name: Updated By Username
         :return: None
         """
 
@@ -469,7 +609,7 @@ class QAKnoweldgeDao(QAKnowledgeBase):
     @classmethod
     def update(cls, qa_knowledge: QAKnowledge):
         if qa_knowledge.id is None:
-            raise ValueError('id不能为空')
+            raise ValueError('idTidak boleh kosong.')
         with get_sync_db_session() as session:
             session.add(qa_knowledge)
             session.commit()
@@ -488,7 +628,7 @@ class QAKnoweldgeDao(QAKnowledgeBase):
         with get_sync_db_session() as session:
             QAKnowledges = session.exec(select(QAKnowledge).where(QAKnowledge.id.in_(ids))).all()
         if not QAKnowledges:
-            raise ValueError('知识库不存在')
+            raise ValueError('Knowledge base does not exist')
         return QAKnowledges
 
     @classmethod
@@ -532,7 +672,7 @@ class QAKnoweldgeDao(QAKnowledgeBase):
 
             return session.exec(sql).all()
 
-    # 根据qa_id获取总数
+    # accordingqa_idTotal Fetched
     @classmethod
     async def async_count_by_id(cls, qa_id: int) -> int:
         async with get_async_db_session() as session:
@@ -550,10 +690,10 @@ class QAKnoweldgeDao(QAKnowledgeBase):
                                    status: QAStatus,
                                    remark: str = "") -> None:
         """
-        根据QA知识点ID批量更新状态
-        :param qa_ids: QA知识点ID列表
-        :param status: 状态
-        :param remark: 备注
+        accordingQAkey learning pointsIDBulk Update Status
+        :param qa_ids: QAkey learning pointsIDVertical
+        :param status: Status
+        :param remark: Remark
         :return:
         """
 
@@ -566,14 +706,14 @@ class QAKnoweldgeDao(QAKnowledgeBase):
             session.exec(statement)
             session.commit()
 
-    # 根据knowledge_id更新status
+    # according knowledge_id Update status
     @classmethod
     def update_status_by_knowledge_id(cls, knowledge_id: int, status: QAStatus, remark: str = "") -> None:
         """
-        根据knowledge_id更新status
-        :param knowledge_id: 知识库ID
-        :param status: 状态
-        :param remark: 备注
+        according knowledge_id Update status
+        :param knowledge_id: The knowledge base uponID
+        :param status: Status
+        :param remark: Remark
         :return:
         """
 
@@ -585,3 +725,5 @@ class QAKnoweldgeDao(QAKnowledgeBase):
         with get_sync_db_session() as session:
             session.exec(statement)
             session.commit()
+
+# ─── Space Folder / File helpers (Space-scoped operations on KnowledgeFile) ──

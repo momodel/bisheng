@@ -1,75 +1,110 @@
 from datetime import datetime
+from enum import Enum
 from typing import Optional, List, Dict
 
-from sqlalchemy import Column, DateTime, UniqueConstraint
-from sqlmodel import Field, select, delete, and_, func, text
+from sqlalchemy import Column, DateTime, String, UniqueConstraint
+from sqlmodel import Field, select, delete, and_, func, text, col
 
 from bisheng.common.models.base import SQLModelSerializable
-from bisheng.core.database import get_sync_db_session
+from bisheng.core.database import get_sync_db_session, get_async_db_session
 from bisheng.database.models.group_resource import ResourceTypeEnum
+
+
+class TagBusinessTypeEnum(str, Enum):
+    KNOWLEDGE_SPACE = 'knowledge_space'
+    APPLICATION = 'application'
 
 
 class TagBase(SQLModelSerializable):
     """
-    标签表
+    Tag Form
     """
-    name: Optional[str] = Field(default=None, index=True, unique=True, description="标签名称")
-    user_id: int = Field(default=0, description='创建用户ID')
+    name: Optional[str] = Field(default=None, index=True, description="Label Name")
+    business_type: TagBusinessTypeEnum = Field(default=TagBusinessTypeEnum.APPLICATION,
+                                               description="Business Type")
+    business_id: Optional[str] = Field(default=None, sa_column=Column(String(36)), description="Business ID")
+    user_id: int = Field(default=0, description='Create UserID')
     create_time: Optional[datetime] = Field(default=None, sa_column=Column(
-        DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP')), description="创建时间")
+        DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP')), description="Creation Time")
     update_time: Optional[datetime] = Field(default=None, sa_column=Column(
         DateTime, nullable=False, server_default=text('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')))
 
 
 class Tag(TagBase, table=True):
-    id: Optional[int] = Field(default=None, index=True, primary_key=True, description="标签唯一ID")
+    id: Optional[int] = Field(default=None, index=True, primary_key=True, description="Tag UniqueID")
 
 
 class TagLinkBase(SQLModelSerializable):
     """
-    标签关联表
+    Label Association Table
     """
-    tag_id: int = Field(index=True, description="标签ID")
-    resource_id: str = Field(description="资源唯一ID")
-    resource_type: int = Field(description="资源类型")  # 使用group_resource.ResourceTypeEnum枚举值
-    user_id: int = Field(default=0, description='创建用户ID')
+    tag_id: int = Field(index=True, description="labelID")
+    resource_id: str = Field(description="Resource UniqueID")
+    resource_type: int = Field(description="Resource Type")  # Usegroup_resource.ResourceTypeEnumEnumeration
+    user_id: int = Field(default=0, description='Create UserID')
     create_time: Optional[datetime] = Field(default=None, sa_column=Column(
-        DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP')), description="创建时间")
+        DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP')), description="Creation Time")
     update_time: Optional[datetime] = Field(default=None, sa_column=Column(
         DateTime, nullable=False, server_default=text('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')))
 
 
 class TagLink(TagLinkBase, table=True):
     __table_args__ = (UniqueConstraint('resource_id', 'resource_type', 'tag_id', name='resource_tag_uniq'),)
-    id: Optional[int] = Field(default=None, index=True, primary_key=True, description="标签关联唯一ID")
+    id: Optional[int] = Field(default=None, index=True, primary_key=True, description="Tag Association UniqueID")
 
 
 class TagDao(Tag):
 
     @classmethod
-    def search_tags(cls, keyword: str = None, page: int = 0, limit: int = 0) -> List[Tag]:
-        """ 默认获取所有标签 可分页查找 """
+    def search_tags(cls, keyword: str = None, page: int = 0, limit: int = 0, *,
+                    business_type: TagBusinessTypeEnum, business_id: str) -> List[Tag]:
+        """ Get all tags by default Paginable """
         statement = select(Tag)
         if keyword:
             statement = statement.where(Tag.name.like(f'%{keyword}%'))
         if page and limit:
             statement = statement.offset((page - 1) * limit).limit(limit)
+        statement = statement.where(Tag.business_type == business_type,
+                                    Tag.business_id == business_id)
 
         with get_sync_db_session() as session:
             return session.exec(statement).all()
 
     @classmethod
-    def count_tags(cls, keyword: str = None) -> int:
-        """ 统计标签数量 """
+    def count_tags(cls, keyword: str = None, *, business_type: TagBusinessTypeEnum, business_id: str) -> int:
+        """ Count the number of tags """
         statement = select(func.count(Tag.id))
         if keyword:
             statement = statement.where(Tag.name.like(f'%{keyword}%'))
+        statement = statement.where(Tag.business_type == business_type,
+                                    Tag.business_id == business_id)
         with get_sync_db_session() as session:
             return session.scalar(statement)
 
     @classmethod
     def insert_tag(cls, data: Tag) -> Tag:
-        """ 插入一条新的标签数据 """
+        """ Insert a new label data """
+        with get_sync_db_session() as session:
+            session.add(data)
+            session.commit()
+            session.refresh(data)
+            return data
+
+    @classmethod
+    async def ainsert_tag(cls, data: Tag) -> Tag:
+        """ Insert a new label data """
+        async with get_async_db_session() as session:
+            session.add(data)
+            await session.commit()
+            await session.refresh(data)
+            return data
+
+    @classmethod
+    def update_tag(cls, data: Tag) -> Tag:
+        """ Update a new label data """
+        if data.id is None:
+            raise ValueError("Tag ID cannot be None for update operation")
+
         with get_sync_db_session() as session:
             session.add(data)
             session.commit()
@@ -78,40 +113,61 @@ class TagDao(Tag):
 
     @classmethod
     def delete_tag(cls, tag_id: int) -> bool:
-        """ 删除一条标签数据 """
+        """ Delete a label data """
         with get_sync_db_session() as session:
-            # 删除标签数据
-            session.exec(delete(Tag).where(Tag.id == tag_id))
-            # 删除标签关联的数据
-            session.exec(delete(TagLink).where(TagLink.tag_id == tag_id))
+            # Delete tag data
+            session.exec(delete(Tag).where(col(Tag.id) == tag_id))
+            # Delete data associated with tags
+            session.exec(delete(TagLink).where(col(TagLink.tag_id) == tag_id))
             session.commit()
             return True
 
     @classmethod
+    async def delete_business_tag(cls, tag_id: int, business_type: TagBusinessTypeEnum, business_id: str) -> bool:
+        """ Delete a label data """
+        statement = delete(Tag).where(col(Tag.business_type) == business_type,
+                                      col(Tag.business_id) == business_id,
+                                      col(Tag.id) == tag_id)
+        async with get_async_db_session() as session:
+            await session.exec(statement)
+            await session.commit()
+            return True
+
+    @classmethod
     def get_tag_by_name(cls, name: str) -> Tag:
-        """ 通过标签名查找标签 """
+        """ Find tags by tag name """
         with get_sync_db_session() as session:
             statement = select(Tag).where(Tag.name == name)
             return session.exec(statement).first()
 
     @classmethod
     def get_tag_by_id(cls, tag_id: int) -> Tag:
-        """ 通过标签ID查找标签 """
+        """ by TagIDFind Tags """
         with get_sync_db_session() as session:
             statement = select(Tag).where(Tag.id == tag_id)
             return session.exec(statement).first()
 
     @classmethod
     def get_tags_by_ids(cls, tag_ids: List[int]) -> List[Tag]:
-        """ 通过标签ID查找标签 """
+        """ by TagIDFind Tags """
         with get_sync_db_session() as session:
             statement = select(Tag).where(Tag.id.in_(tag_ids))
             return session.exec(statement).all()
 
     @classmethod
+    async def get_tags_by_business(cls, business_type: TagBusinessTypeEnum, business_id: str, name: str = None) -> List[
+        Tag]:
+        statement = select(Tag).where(Tag.business_type == business_type, Tag.business_id == business_id)
+        if name:
+            statement = statement.where(Tag.name == name)
+        async with get_async_db_session() as session:
+            result = await session.exec(statement)
+            return result.all()
+
+    @classmethod
     def get_tags_by_resource(cls, resource_type: ResourceTypeEnum | None, resource_ids: list[str]) -> Dict[
         str, List[Tag]]:
-        """ 查询资源下的所有标签 """
+        """ Query all tags under resources """
         if resource_type is None:
             statement = select(Tag.id, Tag.name, TagLink.resource_id).join(TagLink,
                                                                            and_(
@@ -135,7 +191,7 @@ class TagDao(Tag):
     @classmethod
     def get_tags_by_resource_batch(cls, resource_type: List[ResourceTypeEnum], resource_ids: list[str]) -> Dict[
         str, List[Tag]]:
-        """ 查询资源下的所有标签 """
+        """ Query all tags under resources """
         with get_sync_db_session() as session:
             statement = select(Tag.id, Tag.name, TagLink.resource_id).join(TagLink,
                                                                            and_(
@@ -153,15 +209,22 @@ class TagDao(Tag):
 
     @classmethod
     def get_resources_by_tags(cls, tag_ids: List[int], resource_type: ResourceTypeEnum) -> List[TagLink]:
-        """ 查询标签下的所有资源 """
+        """ Query all resources under tags """
 
         statement = select(TagLink).where(TagLink.tag_id.in_(tag_ids), TagLink.resource_type == resource_type.value)
         with get_sync_db_session() as session:
             return session.exec(statement).all()
 
     @classmethod
+    async def aget_resources_by_tags(cls, tag_ids: List[int], resource_type: ResourceTypeEnum) -> List[TagLink]:
+        """ Query all resources under tags """
+        statement = select(TagLink).where(TagLink.tag_id.in_(tag_ids), TagLink.resource_type == resource_type.value)
+        async with get_async_db_session() as session:
+            return (await session.exec(statement)).all()
+
+    @classmethod
     def get_resources_by_tags_batch(cls, tag_ids: List[int], resource_type: List[ResourceTypeEnum]) -> List[TagLink]:
-        """ 查询标签下的所有资源 """
+        """ Query all resources under tags """
 
         statement = select(TagLink).where(TagLink.tag_id.in_(tag_ids),
                                           TagLink.resource_type.in_([x.value for x in resource_type]))
@@ -170,7 +233,7 @@ class TagDao(Tag):
 
     @classmethod
     def insert_tag_link(cls, tag_link: TagLink) -> TagLink:
-        """ 插入标签关联数据 """
+        """ Insert Label Associated Data """
         with get_sync_db_session() as session:
             session.add(tag_link)
             session.commit()
@@ -179,30 +242,66 @@ class TagDao(Tag):
 
     @classmethod
     def get_tag_link(cls, tag_link_id: int) -> TagLink:
-        """ 通过标签关联ID查找标签关联数据 """
+        """ Associate via tagsIDFind Label Associated Data """
         with get_sync_db_session() as session:
             statement = select(TagLink).where(TagLink.id == tag_link_id)
             return session.exec(statement).first()
 
     @classmethod
     def delete_tag_link(cls, tag_link_id: int) -> bool:
-        """ 删除标签关联数据 """
+        """ Delete tag association data """
         with get_sync_db_session() as session:
-            # 删除标签关联数据
+            # Delete tag association data
             session.exec(delete(TagLink).where(TagLink.id == tag_link_id))
             session.commit()
             return True
 
     @classmethod
     def delete_resource_tag(cls, tag_id: int, resource_id: str, resource_type: ResourceTypeEnum) -> bool:
-        """ 删除标签关联数据 """
+        """ Delete tag association data """
         statement = delete(TagLink).where(
             TagLink.tag_id == tag_id,
             TagLink.resource_id == resource_id,
             TagLink.resource_type == resource_type.value
         )
         with get_sync_db_session() as session:
-            # 删除标签关联数据
+            # Delete tag association data
             session.exec(statement)
             session.commit()
+            return True
+
+    @classmethod
+    async def aupdate_resource_tags(cls, tag_ids: List[int], resource_id: str, resource_type: ResourceTypeEnum,
+                                    user_id: int) -> bool:
+        """ Update tag association data """
+        async with get_async_db_session() as session:
+            # Delete original tag association data
+            statement = delete(TagLink).where(
+                col(TagLink.resource_id) == resource_id,
+                col(TagLink.resource_type) == resource_type.value
+            )
+            await session.exec(statement)
+            # Insert new tag association data
+            for tag_id in tag_ids:
+                tag_link = TagLink(tag_id=tag_id, resource_id=resource_id, resource_type=resource_type.value,
+                                   user_id=user_id)
+                session.add(tag_link)
+            await session.commit()
+            return True
+
+    @classmethod
+    async def add_tags(cls, tag_ids: List[int], resource_id: str, resource_type: ResourceTypeEnum,
+                       user_id: int) -> bool:
+        """ Add tag association data """
+        exists_statement = select(TagLink).where(
+            TagLink.resource_id == resource_id,
+            TagLink.resource_type == resource_type.value,
+        )
+        async with get_async_db_session() as session:
+            exists_tags = (await session.exec(exists_statement)).all()
+            need_add_tags = set(tag_ids) - set([one.tag_id for one in exists_tags])
+            for one in need_add_tags:
+                session.add(
+                    TagLink(tag_id=one, resource_id=resource_id, resource_type=resource_type.value, user_id=user_id))
+            await session.commit()
             return True

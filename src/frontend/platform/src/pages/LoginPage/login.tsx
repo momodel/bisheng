@@ -85,7 +85,6 @@ export const LoginPage = () => {
             ).then((res: any) => {
                 window.self === window.top ? localStorage.removeItem('ws_token') : localStorage.setItem('ws_token', res.access_token)
                 localStorage.setItem('isLogin', '1')
-                // const path = location.href.indexOf('from=workspace') === -1 ? '' : '/workspace'
                 const pathname = localStorage.getItem('LOGIN_PATHNAME')
                 if (pathname) {
                     // After the login session expires, redirect back to the login page. After successful login, redirect back to the page before login. 
@@ -96,11 +95,11 @@ export const LoginPage = () => {
                     const baseUrl = __APP_ENV__.BASE_URL === '/' ? '' : __APP_ENV__.BASE_URL
                     location.href = location.pathname === (baseUrl + '/') ? location.origin + baseUrl + '/build/apps' : location.href
                 }
-                // location.href = __APP_ENV__.BASE_URL + '/'
             }), (error) => {
-                if (error.indexOf('过期') !== -1) { // 有时间改为 code 判断
+                if (error?.code === 10601) { // 密码过期
                     localStorage.setItem('account', mail)
                     navigate('/reset', { state: { noback: true } })
+                    return true // Skip the default error toast; resetPwd page shows its own
                 }
             })
 

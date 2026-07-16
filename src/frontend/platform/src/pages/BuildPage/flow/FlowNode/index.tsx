@@ -16,6 +16,7 @@ import RunLog from './RunLog';
 import { RunTest } from './RunTest';
 import { useUpdateVariableState } from './flowNodeStore';
 import { useTranslation } from 'react-i18next';
+import ParameterSubGroup from './ParameterSubGroup';
 
 export const CustomHandle = ({ id = '', node, isLeft = false, className = '' }) => {
     const [openLeft, setOpenLeft] = useState(false);
@@ -196,6 +197,35 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
         return [];
     }
 
+    // update system prompt
+    const hackCountRef = useRef(0)
+    const handleAddSysPrompt = (type: 'knowledge' | 'sql') => {
+        node.group_params.forEach(group => {
+            if (group.params && Array.isArray(group.params)) {
+
+                const targetParam = group.params.find(p => p.key === 'system_prompt');
+
+                if (targetParam) {
+                    let currentValue = targetParam.value || "";
+                    const map = {
+                        'knowledge': t('kbQueryToolIntro'),
+                        'sql': t('sqlAgentToolIntro')
+                    }
+                    const searchStr = map[type]
+                    if (!currentValue.includes(searchStr)) {
+                        hackCountRef.current++
+                        const hackSpace = hackCountRef.current % 2 === 0 ? ' ' : '' // Avoid React's refresh mechanism 
+                        targetParam.value = currentValue === '\n' ? searchStr : `${currentValue}\n${searchStr}${hackSpace}`;
+                    }
+                }
+            }
+        });
+
+        setTimeout(() => {
+            setFocusUpdate(!focusUpdate) // render
+        }, 100);
+    }
+
     const [expend, setExpend] = useState(node.expand === undefined ? true : node.expand)
 
     const { isVisible, handleMouseEnter, handleMouseLeave } = useHoverToolbar();
@@ -219,8 +249,8 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
                 {/* top */}
                 <RunLog node={node}>
                     <div className='bisheng-node-top flex items-center'>
-                        <LoadingIcon className='size-5 text-[#B3BBCD]' />
-                        <span className='node-face text-sm text-[#B3BBCD]'>BISHENG</span>
+                        {t('bisheng', { ns: 'bs' }) === 'BISHENG' && <LoadingIcon className='size-5 text-[#B3BBCD]' />}
+                        <span className='node-face text-sm text-[#B3BBCD]'>{t('bisheng', { ns: 'bs' })}</span>
                     </div>
                 </RunLog>
 
@@ -293,14 +323,24 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
                                     })
                                 })
                             }} />}
-                        {node.group_params.map(group =>
-                            <ParameterGroup
+                        {node.group_params.map(group => group.groupKey ?
+                            <ParameterSubGroup
+                                key={group.groupKey}
+                                nodeId={node.id}
+                                node={node}
+                                cate={group}
+                                onStatusChange={((key, obj) => paramValidateEntities.current[key] = obj)}
+                                onVarEvent={((key, obj) => varValidateEntities.current[key] = obj)}
+                                tab={currentTab}
+                            />
+                            : <ParameterGroup
                                 nodeId={node.id}
                                 key={group.name}
                                 tab={currentTab}
                                 node={node}
                                 cate={group}
                                 onOutPutChange={handleChangeOutPut}
+                                onAddSysPrompt={handleAddSysPrompt}
                                 onFouceUpdate={() => setFocusUpdate(!focusUpdate)}
                                 onStatusChange={((key, obj) => paramValidateEntities.current[key] = obj)}
                                 onVarEvent={((key, obj) => varValidateEntities.current[key] = obj)}

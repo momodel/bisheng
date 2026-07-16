@@ -18,10 +18,10 @@ router = APIRouter(prefix='/evaluation', tags=['Evaluation'], dependencies=[Depe
 
 @router.get('')
 def get_evaluation(*,
-                   page: Optional[int] = Query(default=1, gt=0, description='页码'),
-                   limit: Optional[int] = Query(default=10, gt=0, description='每页条数'),
+                   page: Optional[int] = Query(default=1, gt=0, description='Page'),
+                   limit: Optional[int] = Query(default=10, gt=0, description='Listings Per Page'),
                    login_user: UserPayload = Depends(UserPayload.get_login_user)):
-    """ 获取评测任务列表. """
+    """ Get a list of assessment tasks. """
     return EvaluationService.get_evaluation(login_user, page, limit)
 
 
@@ -34,47 +34,52 @@ def create_evaluation(*,
                       version: Optional[int | str] = Form(default=None),
                       background_tasks: BackgroundTasks,
                       login_user: UserPayload = Depends(UserPayload.get_login_user)):
-    """ 创建评测任务. """
-    user_id = login_user.user_id
-    if not version:
-        version = 0
-
+    """ Create Assessment Task. """
     try:
-        # 尝试做下转码操作
-        output_file = convert_encoding_cchardet(file_io=io.BytesIO(file.file.read()))
-        csv_data = EvaluationService.parse_csv(file_data=output_file)
-        data_samples = {
-            "question": [one.get('question') for one in csv_data],
-            "answer": [one.get('answer') for one in csv_data],
-            "ground_truths": [[one.get('ground_truth')] for one in csv_data]
-        }
-        dataset = Dataset.from_dict(data_samples)
-    except Exception:
-        raise UploadFileExtError()
+        user_id = login_user.user_id
+        if not version:
+            version = 0
+
+        try:
+            # Try transcoding
+            output_file = convert_encoding_cchardet(file.file.read(), 'utf-8')
+            csv_data = EvaluationService.parse_csv(file_data=output_file)
+            data_samples = {
+                "question": [one.get('question') for one in csv_data],
+                "answer": [one.get('answer') for one in csv_data],
+                "ground_truths": [[one.get('ground_truth')] for one in csv_data]
+            }
+            dataset = Dataset.from_dict(data_samples)
+        except Exception:
+            raise UploadFileExtError()
+        finally:
+            file.file.seek(0)
+
+        file_name, file_path = EvaluationService.upload_file(file=file)
+        db_evaluation = Evaluation.model_validate(EvaluationCreate(unique_id=unique_id,
+                                                                   exec_type=exec_type,
+                                                                   version=version,
+                                                                   prompt=prompt,
+                                                                   user_id=user_id,
+                                                                   file_name=file_name,
+                                                                   file_path=file_path))
+        with get_sync_db_session() as session:
+            session.add(db_evaluation)
+            session.commit()
+            session.refresh(db_evaluation)
+
+        background_tasks.add_task(add_evaluation_task, evaluation_id=db_evaluation.id)
+
+        return resp_200(db_evaluation.copy())
+    except Exception as e:
+        raise e
     finally:
-        file.file.seek(0)
-
-    file_name, file_path = EvaluationService.upload_file(file=file)
-    db_evaluation = Evaluation.model_validate(EvaluationCreate(unique_id=unique_id,
-                                                               exec_type=exec_type,
-                                                               version=version,
-                                                               prompt=prompt,
-                                                               user_id=user_id,
-                                                               file_name=file_name,
-                                                               file_path=file_path))
-    with get_sync_db_session() as session:
-        session.add(db_evaluation)
-        session.commit()
-        session.refresh(db_evaluation)
-
-    background_tasks.add_task(add_evaluation_task, evaluation_id=db_evaluation.id)
-
-    return resp_200(db_evaluation.copy())
+        file.file.close()
 
 
 @router.delete('/{evaluation_id}', status_code=200)
 def delete_evaluation(*, evaluation_id: int, login_user: UserPayload = Depends(UserPayload.get_login_user)):
-    """ 删除评测任务（逻辑删除）. """
+    """ Delete Assessment Task (Logical Delete). """
     return EvaluationService.delete_evaluation(evaluation_id, user_payload=login_user)
 
 
@@ -82,7 +87,7 @@ def delete_evaluation(*, evaluation_id: int, login_user: UserPayload = Depends(U
 async def get_download_url(*,
                            file_url: str,
                            login_user: UserPayload = Depends(UserPayload.get_login_user)):
-    """ 获取文件下载地址. """
+    """ Get file download address. """
     minio_client = await get_minio_storage()
     download_url = await minio_client.get_share_link(file_url)
     return resp_200(data={
@@ -93,6 +98,6 @@ async def get_download_url(*,
 @router.post('/{evaluation_id}/process', status_code=200)
 def process_evaluation(*, evaluation_id: int, background_tasks: BackgroundTasks,
                        login_user: UserPayload = Depends(UserPayload.get_login_user)):
-    """ 手动执行评测任务. """
+    """ Perform assessment tasks manually. """
     background_tasks.add_task(add_evaluation_task, evaluation_id=evaluation_id)
     return resp_200()

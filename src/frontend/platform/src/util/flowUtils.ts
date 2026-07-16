@@ -32,25 +32,37 @@ export function initNode(node, nds, t) {
         }
         return node;
     }
-
+    const nodeMap = new Map(nds.map(n => [n.data.type, n.data]));
     node.group_params.forEach(group => {
         group.params.forEach(param => {
-            if (param.type === "var_textarea" && typeof param.value === "string") {
-                if (param.value) {
-                    param.value = t(`node.${node.type}.${param.key}.value`)
-                }
-                // Replace expressions by inserting the node id dynamically
-                param.value = param.value.replace(/{{#([^/]*\/)?(.*?)#}}/g, (match, prefix = '', expression) => {
-                    if (param.varZh) {
-                        param.varZh[`${prefix}${id}.${expression}`] = `${prefix}${expression}`
-                    } else {
-                        param.varZh = {
-                            [`${prefix}${id}.${expression}`]: `${prefix}${expression}`
-                        }
-                    }
-                    return `{{#${prefix}${id}.${expression}#}}`;
-                });
+            if (param.type !== "var_textarea" || typeof param.value !== "string" || !param.value) {
+                return;
             }
+
+            const translationKey = `node.${node.type}.${param.key}.value`;
+            param.value = t(translationKey);
+
+            // Replace expressions by inserting the node id dynamically
+            param.value = param.value.replace(/{{#([^/]*\/)?(.*?)#}}/g, (match, prefixMatch = '', expression) => {
+                let targetId = id;
+                let targetName = '';
+                if (prefixMatch) {
+                    const typePrefix = prefixMatch.replace('/', '');
+                    const targetNode = nodeMap.get(typePrefix);
+
+                    if (targetNode) {
+                        targetId = targetNode.id;
+                        targetName = `${targetNode.name}/`;
+                    } else {
+                        return match;
+                    }
+                }
+
+                param.varZh = param.varZh ?? {};
+                param.varZh[`${targetId}.${expression}`] = `${targetName}${expression}`;
+
+                return `{{#${targetId}.${expression}#}}`;
+            });
         });
     });
 
@@ -103,6 +115,40 @@ export function getToolTree(temp) {
     }
 }
 
+// input特殊处理校验
+export function filterParamByinputCheck(group) {
+    if (group.groupKey === 'inputfile') {
+        const userInputFileParam = group.params.find(p => p.key === 'user_input_file');
+        if (userInputFileParam && userInputFileParam.value === false) {
+            return [];
+        }
+
+        const parseMode = group.params.find(p => p.key === 'file_parse_mode')?.value;
+        const acceptType = group.params.find(p => p.key === 'dialog_file_accept')?.value;
+
+        return group.params.filter(param => {
+            const { key } = param;
+
+            if (!Object.prototype.hasOwnProperty.call(param, 'global')) {
+                return false;
+            }
+
+            if (parseMode === 'extract_text' && ['dialog_image_files', 'dialog_file_paths'].includes(key)) {
+                return false;
+            }
+            if (parseMode === 'keep_raw' && key === 'dialog_files_content') {
+                return false;
+            }
+            if (acceptType === 'file' && key === 'dialog_image_files') {
+                return false;
+            }
+
+            return true;
+        });
+    }
+    return group.params
+}
+
 // 变量是否存在flow中
 // 所有情况
 // start_3ca7f.preset_question
@@ -114,8 +160,10 @@ export function isVarInFlow(nodeId, nodes, varName, varNameCn) {
     const nodeName = nodes.find(node => node.id === nodeId).data.name
     const varNodeId = varName.match(/^([^.]+)/)[1]
     const res = nodes.some(node =>
-        varNodeId === node.id ? node.data.group_params.some(group =>
-            group.params.some(param => {
+        varNodeId === node.id ? node.data.group_params.some(group => {
+            // input
+            const params = filterParamByinputCheck(group)
+            return params.some(param => {
                 if (param.key === 'custom_variables') {
                     const questionId = varName.split('#')[1]
                     const quwstionStr = varNameCn?.split('/')[1] || ''
@@ -145,7 +193,7 @@ export function isVarInFlow(nodeId, nodes, varName, varNameCn) {
                     return `${node.id}.${param.key}` === varName
                 }
             })
-        ) : false
+        }) : false
     )
     return res ? '' : i18next.t('nodeErrorMessage', { ns: 'flow', nodeName, varNameCn })
 }

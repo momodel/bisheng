@@ -1,13 +1,12 @@
 from base64 import b64decode
 from datetime import datetime
-from typing import List
+from typing import List, TYPE_CHECKING
+from urllib.parse import unquote, urlsplit
 
-import rsa
 import os
-from fastapi import Request, Depends
+import rsa
+from fastapi import Request, Depends, UploadFile, HTTPException
 
-from bisheng.api.services.audit_log import AuditLogService
-from bisheng.api.v1.schemas import CreateUserReq
 from bisheng.common.constants.enums.telemetry import BaseTelemetryTypeEnum
 from bisheng.common.errcode.user import (UserNameAlreadyExistError,
                                          UserNeedGroupAndRoleError, UserForbiddenError, CaptchaError, UserValidateError,
@@ -18,16 +17,81 @@ from bisheng.common.services import telemetry_service
 from bisheng.common.services.config_service import settings
 from bisheng.core.cache.redis_manager import get_redis_client_sync, get_redis_client
 from bisheng.core.logger import trace_id_var
+from bisheng.core.storage.minio.minio_manager import get_minio_storage, get_minio_storage_sync
 from bisheng.database.models.user_group import UserGroupDao
 from bisheng.user.domain.models.user import User, UserDao, UserLogin, UserRead, UserCreate
-from bisheng.utils import md5_hash, get_request_ip
+from bisheng.utils import md5_hash, get_request_ip, generate_uuid
 from bisheng.utils.constants import RSA_KEY
 from .auth import LoginUser, AuthJwt
 from .captcha import verify_captcha
 from ..const import USER_PASSWORD_ERROR, USER_CURRENT_SESSION
 
+if TYPE_CHECKING:
+    from bisheng.api.v1.schemas import CreateUserReq
+
+# Allowed avatar file types and their MIME types
+ALLOWED_AVATAR_TYPES = {
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+    'image/gif': '.gif',
+}
+MAX_AVATAR_SIZE = 10 * 1024 * 1024  # 10MB
+AVATAR_OBJECT_PREFIX = 'avatar/'
+
 
 class UserService:
+    @classmethod
+    def _normalize_avatar_object_name(cls, avatar: str | None, bucket: str | None = None) -> str | None:
+        if not avatar:
+            return avatar
+
+        avatar = avatar.strip()
+        path = urlsplit(avatar).path if '://' in avatar or avatar.startswith('/') else avatar.split('?', 1)[0]
+        path = unquote(path).lstrip('/')
+
+        if bucket and path.startswith(f'{bucket}/'):
+            path = path[len(bucket) + 1:]
+
+        if path.startswith(AVATAR_OBJECT_PREFIX):
+            return path
+        return None
+
+    @classmethod
+    def get_avatar_share_link_sync(cls, avatar: str | None) -> str | None:
+        if not avatar:
+            return avatar
+
+        minio_client = get_minio_storage_sync()
+        object_name = cls._normalize_avatar_object_name(avatar, minio_client.bucket)
+        if not object_name:
+            return avatar
+        return minio_client.get_share_link_sync(object_name)
+
+    @classmethod
+    async def get_avatar_share_link(cls, avatar: str | None) -> str | None:
+        if not avatar:
+            return avatar
+
+        minio_client = await get_minio_storage()
+        object_name = cls._normalize_avatar_object_name(avatar, minio_client.bucket)
+        if not object_name:
+            return avatar
+        return await minio_client.get_share_link(object_name)
+
+    @classmethod
+    async def build_user_read(cls, user: User, **kwargs) -> UserRead:
+        user_data = user.model_dump()
+        user_data.update(kwargs)
+        user_data['avatar'] = await cls.get_avatar_share_link(user_data.get('avatar'))
+        return UserRead(**user_data)
+
+    @classmethod
+    def build_user_read_sync(cls, user: User, **kwargs) -> UserRead:
+        user_data = user.model_dump()
+        user_data.update(kwargs)
+        user_data['avatar'] = cls.get_avatar_share_link_sync(user_data.get('avatar'))
+        return UserRead(**user_data)
 
     @classmethod
     def decrypt_md5_password(cls, password: str):
@@ -50,13 +114,13 @@ class UserService:
         return str(token) == str(conf_token)
 
     @classmethod
-    def create_user(cls, request: Request, login_user: LoginUser, req_data: CreateUserReq):
+    def create_user(cls, request: Request, login_user: LoginUser, req_data: 'CreateUserReq'):
         """
-        创建用户
+        Create User
         """
         exists_user = UserDao.get_user_by_username(req_data.user_name)
         if exists_user:
-            # 抛出异常
+            # Throwing an exception?
             raise UserNameAlreadyExistError.http_exception()
         # 有 mo_backend_token 时按明文 md5 处理密码
         if req_data.mo_backend_token is not None:
@@ -86,7 +150,7 @@ class UserService:
 
     @classmethod
     async def clear_error_password_key(cls, username: str):
-        # 清理密码错误次数的计数
+        # Count of cleanup password errors
         error_key = cls.get_error_password_key(username)
         (await get_redis_client()).delete(error_key)
 
@@ -99,23 +163,23 @@ class UserService:
             raise UserValidateError()
 
         if db_user.password == password:
-            # 判断下密码是否长期未修改
+            # Determine if the password has not been changed for a long time
             if password_conf.password_valid_period and password_conf.password_valid_period > 0:
                 if (datetime.now() - db_user.password_update_time).days >= password_conf.password_valid_period:
                     raise UserPasswordExpireError()
             return
 
-        # 判断是否需要记录错误次数
+        # Determine if the number of errors needs to be logged
         if not password_conf.login_error_time_window or not password_conf.max_error_times:
             raise UserValidateError()
-        # 错误次数加1
+        # Number of errors plus1
         error_key = cls.get_error_password_key(db_user.user_name)
         error_num = await redis_client.aincr(error_key)
         if error_num == 1:
-            # 首次设置key的过期时间
+            # First time setupkeyExpiration date
             await redis_client.aexpire_key(error_key, password_conf.login_error_time_window * 60)
         if error_num and int(error_num) >= password_conf.max_error_times:
-            # 错误次数到达上限，封禁账号
+            # Maximum number of errors reached, account banned
             db_user.delete = 1
             await UserDao.aupdate_user(db_user)
             raise UserPasswordMaxTryError()
@@ -123,7 +187,7 @@ class UserService:
 
     @classmethod
     async def user_register(cls, user: UserCreate):
-        # 验证码校验
+        # Captcha Verification
         if settings.get_from_db('use_captcha'):
             if not user.captcha_key or not await verify_captcha(user.captcha, user.captcha_key):
                 raise CaptchaError()
@@ -137,19 +201,21 @@ class UserService:
         if len(db_user.user_name) > 30:
             raise UserNameTooLongError()
         db_user.password = cls.decrypt_md5_password(user.password)
-        # 判断下admin用户是否存在
+        # Under JudgmentadminDoes the user exist
         admin = await UserDao.aget_user(1)
         if admin:
             db_user = await UserDao.add_user_and_default_role(db_user)
         else:
             db_user.user_id = 1
             db_user = await UserDao.add_user_and_admin_role(db_user)
-        # 将用户写入到默认用户组下
+        # Write users to the default user group
         await UserGroupDao.add_default_user_group(db_user.user_id)
         return db_user
 
     @classmethod
     async def user_login(cls, request: Request, user: UserLogin, auth_jwt: AuthJwt = Depends()):
+        from bisheng.api.services.audit_log import AuditLogService
+
         if await settings.aget_from_db('use_captcha'):
             if not user.captcha_key or not await verify_captcha(user.captcha, user.captcha_key):
                 raise CaptchaError()
@@ -172,30 +238,78 @@ class UserService:
         # set cookies
         LoginUser.set_access_cookies(access_token, auth_jwt=auth_jwt)
 
-        # 设置登录用户当前的cookie, 比jwt有效期多一个小时
+        # Set the logged in user's currentcookie, .jwtValid for an additional hour
         redis_client = await get_redis_client()
         await redis_client.aset(USER_CURRENT_SESSION.format(db_user.user_id), access_token,
                                 auth_jwt.cookie_conf.jwt_token_expire_time + 3600)
 
-        # 记录审计日志
+        # Log Audit Logs
         login_user = await LoginUser.init_login_user(db_user.user_id, db_user.user_name)
         AuditLogService.user_login(login_user, get_request_ip(request))
 
-        # 记录Telemetry日志
+        # RecordTelemetryJournal
         await telemetry_service.log_event(user_id=db_user.user_id, event_type=BaseTelemetryTypeEnum.USER_LOGIN,
                                           trace_id=trace_id_var.get(),
                                           event_data=UserLoginEventData(method="password"))
 
-        return resp_200(UserRead(access_token=access_token, **db_user.__dict__))
+        return resp_200(await cls.build_user_read(db_user, access_token=access_token))
 
     @classmethod
     def get_user_all_info(cls, *, start_time: datetime = None, end_time: datetime = None, user_ids: List[int] = None,
                           page: int = 1, page_size: int = 100) -> List[User]:
-        """ 获取用户信息，包含用户组和角色信息 """
+        """ Get user information, including user group and role information """
         return UserDao.get_user_with_group_role(page=page, page_size=page_size, user_ids=user_ids,
                                                 start_time=start_time, end_time=end_time)
 
     @classmethod
     def get_first_user(cls) -> User | None:
-        """ 获取第一个用户 """
+        """ Get the first user """
         return UserDao.get_first_user()
+
+    @classmethod
+    async def get_user_by_id(cls, user_id: int) -> User | None:
+        """ Get user by username """
+        return await UserDao.aget_user(user_id)
+
+    @classmethod
+    async def update_avatar(cls, user_id: int, file: UploadFile) -> str:
+        """
+        Update user avatar
+        :param user_id: User ID
+        :param file: Uploaded avatar file
+        :return: Avatar URL
+        """
+        # Validate file type
+        if file.content_type not in ALLOWED_AVATAR_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f'Invalid file type. Allowed types: jpg, png, webp, gif'
+            )
+
+        # Read file content to check size
+        content = await file.read()
+        if len(content) > MAX_AVATAR_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail='File size exceeds limit. Maximum size: 10MB'
+            )
+
+        # Generate object name for MinIO
+        file_ext = ALLOWED_AVATAR_TYPES[file.content_type]
+        object_name = f'avatar/{user_id}/{generate_uuid()}{file_ext}'
+
+        # Upload to MinIO
+        minio_client = await get_minio_storage()
+        await minio_client.put_object(
+            object_name=object_name,
+            file=content,
+            content_type=file.content_type,
+        )
+
+        # Update user avatar in database
+        user = await UserDao.aget_user(user_id)
+        if user:
+            user.avatar = object_name
+            await UserDao.aupdate_user(user)
+
+        return await cls.get_avatar_share_link(object_name)

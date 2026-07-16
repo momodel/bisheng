@@ -1,6 +1,6 @@
 
 import { X } from "lucide-react";
-import { useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { uploadChatFile } from "~/api/apps";
 import { AttachmentIcon } from "~/components/svg";
 import { FileIcon, getFileTypebyFileName } from "~/components/ui/icon/File/FileIcon";
@@ -8,8 +8,22 @@ import useLocalize from "~/hooks/useLocalize";
 import { useToastContext } from "~/Providers";
 import { cn, generateUUID, getFileExtension } from "~/utils";
 
+const checkFileType = (file, accepts) => {
+    if (!accepts || accepts === '*') return true;
+    const fileName = file.name.toLowerCase();
+    const acceptArr = accepts.split(',').map(a => a.trim().toLowerCase());
+
+    // 检查后缀名 (例如 .pdf) 或 MIME type
+    return acceptArr.some(type => {
+        if (type.startsWith('.')) {
+            return fileName.endsWith(type);
+        }
+        return file.type.match(new RegExp(type.replace('*', '.*')));
+    });
+};
+
 // @accepts '.png,.jpg'
-export default function InputFiles({ v, showVoice, accepts, disabled = false, size, onChange }) {
+const InputFiles = forwardRef(({ v, showVoice, accepts, disabled = false, size, onChange, uploadMode }, ref) => {
     const t = useLocalize()
     const [files, setFiles] = useState([]);
     const filesRef = useRef([]);
@@ -19,21 +33,27 @@ export default function InputFiles({ v, showVoice, accepts, disabled = false, si
     const fileInputRef = useRef(null);
     const fileSizeLimit = size * 1024 * 1024; // File size limit in bytes
 
-    const handleFileChange = (e) => {
-        const selectedFiles = Array.from(e.target.files);
+    const handleFileChange = (selectedFiles) => {
         const validFiles = [];
         const invalidFiles = [];
+        const invalidTypeFiles = [];
 
         fileInputRef.current.value = ''
         // Validate files based on file extensions
         selectedFiles.forEach((file) => {
-            if (file.size <= fileSizeLimit) {
+            if (!checkFileType(file, accepts)) {
+                invalidTypeFiles.push(file);
+                return;
+            } else if (file.size <= fileSizeLimit) {
                 validFiles.push({ id: generateUUID(6), file });
             } else {
                 invalidFiles.push({ id: generateUUID(6), file });
             }
         });
 
+        if (invalidTypeFiles.length > 0) {
+            showToast({ message: t('com_ui_upload_file_type_error'), status: 'error' }); // 请确保你有对应多语言key或直接写死中文测试
+        }
         // Show invalid file toast
         if (invalidFiles.length > 0) {
             invalidFiles.map(file =>
@@ -83,11 +103,14 @@ export default function InputFiles({ v, showVoice, accepts, disabled = false, si
                     filesRef.current = updatedFiles;
                     return updatedFiles;
                 });
-            }).then(response => {
-                const filePath = response.data.file_path; // Assuming the response contains the file ID
+            }, uploadMode).then(response => {
+                // Upload API returns `filepath` (no underscore). Keep `file_path` fallback
+                // for any caller/endpoint that still uses the snake-case form.
+                const filePath = response.data.filepath ?? response.data.file_path;
+                const fileId = response.data.file_id; // Server-returned file_id
                 filesRef.current = filesRef.current.map(f => {
                     if (f.id === id) {
-                        return { ...f, isUploading: false, filePath, progress: 100 }; // Set progress to 100 when uploaded
+                        return { ...f, isUploading: false, filePath, fileId, progress: 100 }; // Set progress to 100 when uploaded
                     }
                     return f;
                 });
@@ -96,7 +119,7 @@ export default function InputFiles({ v, showVoice, accepts, disabled = false, si
                 remainingUploadsRef.current -= 1; // Decrease the remaining uploads count
                 if (remainingUploadsRef.current === 0) {
                     // Once all files are uploaded, trigger onChange with the file IDs
-                    const uploadedFileIds = filesRef.current.filter(f => f.id).map(f => ({ path: f.filePath, name: f.name }));
+                    const uploadedFileIds = filesRef.current.filter(f => f.id).map(f => ({ file_id: f.fileId || f.id, filepath: f.filePath, type: f.type, name: f.name }));
                     onChange(uploadedFileIds); // Pass the file IDs to onChange
                 }
             }).catch((e) => {
@@ -106,7 +129,7 @@ export default function InputFiles({ v, showVoice, accepts, disabled = false, si
                 remainingUploadsRef.current -= 1; // Decrease the remaining uploads count
                 if (remainingUploadsRef.current === 0) {
                     // If no files remain, trigger onChange immediately
-                    const uploadedFileIds = filesRef.current.filter(f => f.id).map(f => ({ path: f.filePath, name: f.name }));
+                    const uploadedFileIds = filesRef.current.filter(f => f.id).map(f => ({ file_id: f.fileId || f.id, filepath: f.filePath, type: f.type, name: f.name }));
                     onChange(uploadedFileIds);
                 }
             });
@@ -115,10 +138,22 @@ export default function InputFiles({ v, showVoice, accepts, disabled = false, si
         // Wait for all files to finish uploading
         Promise.all(uploadPromises).then(() => {
             // Once all files are uploaded, trigger onChange with the file IDs
-            const uploadedFileIds = filesRef.current.filter(f => f.id).map(f => ({ path: f.filePath, name: f.name }));
+            const uploadedFileIds = filesRef.current.filter(f => f.id).map(f => ({ file_id: f.fileId || f.id, filepath: f.filePath, type: f.type, name: f.name }));
             onChange(uploadedFileIds); // Pass the file IDs to onChange
         });
     };
+
+    useImperativeHandle(ref, () => ({
+        upload: (fileList) => {
+            if (disabled) return;
+            handleFileChange(Array.from(fileList));
+        },
+        clear: () => {
+            setFiles([]);
+            filesRef.current = [];
+            onChange([]);
+        }
+    }));
 
     const handleFileRemove = (fileName) => {
         const res = filesRef.current.filter(file => file.name !== fileName);
@@ -130,7 +165,7 @@ export default function InputFiles({ v, showVoice, accepts, disabled = false, si
 
         if (remainingUploadsRef.current === 0) {
             // If no files remain, trigger onChange immediately
-            const uploadedFileIds = filesRef.current.filter(f => f.id).map(f => ({ id: f.id, name: f.name }));
+            const uploadedFileIds = filesRef.current.filter(f => f.id).map(f => ({ file_id: f.fileId || f.id, filepath: f.filePath, type: f.type, name: f.name }));
             onChange(uploadedFileIds); // Trigger onChange with uploaded file IDs
         }
     };
@@ -182,7 +217,7 @@ export default function InputFiles({ v, showVoice, accepts, disabled = false, si
             {/* File Upload Button disabled */}
             <div
                 className={cn(
-                    'absolute bottom-3 cursor-pointer p-1 hover:bg-gray-200 rounded-full',
+                    'absolute z-10 bottom-3 cursor-pointer p-1 hover:bg-gray-200 rounded-full',
                     showVoice ? 'right-[92px]' : 'right-14',
                     disabled ? 'pointer-events-none opacity-40' : ''
                 )}
@@ -197,9 +232,11 @@ export default function InputFiles({ v, showVoice, accepts, disabled = false, si
                 ref={fileInputRef}
                 multiple
                 accept={accepts}
-                onChange={handleFileChange}
+                onChange={(e) => handleFileChange(Array.from(e.target.files))}
                 className="hidden"
             />
         </div>
     );
-}
+});
+
+export default InputFiles;

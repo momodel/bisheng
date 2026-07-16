@@ -24,7 +24,8 @@ def get_yesterday_date_range(mid_table: BaseMidTable, start_date: str = None, en
     if start_date is None or end_date is None:
         # default to yesterday's date
         now = datetime.now()
-        start_date = (now - timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+        yesterday = now - timedelta(days=1)
+        start_date = datetime(year=yesterday.year, month=yesterday.month, day=yesterday.day, hour=0, minute=0, second=0)
         end_date = datetime(year=now.year, month=now.month, day=now.day, hour=0, minute=0, second=0)
     else:
         start_date = datetime.fromisoformat(start_date)
@@ -41,7 +42,6 @@ def get_yesterday_date_range(mid_table: BaseMidTable, start_date: str = None, en
 
 def convert_flow_type(flow_type: int) -> ApplicationTypeEnum:
     flow_type_mapping = {
-        FlowType.FLOW.value: ApplicationTypeEnum.SKILL,
         FlowType.ASSISTANT.value: ApplicationTypeEnum.ASSISTANT,
         FlowType.WORKFLOW.value: ApplicationTypeEnum.WORKFLOW,
     }
@@ -69,6 +69,7 @@ def sync_mid_user_increment(start_date: str = None, end_date: str = None):
         records = []
         for user in user_list:
             records.append(UserIncrementRecord(
+                es_id=f"user_{user.user_id}",
                 user_id=user.user_id,
                 user_name=user.user_name,
                 user_group_infos=[UserGroupInfo(user_group_id=group.id, user_group_name=group.group_name)
@@ -121,6 +122,7 @@ def sync_mid_app_increment(start_date: str = None, end_date: str = None):
         for app in app_list:
             user = user_map.get(app['user_id'], None)
             records.append(AppIncrementRecord(
+                es_id=f"app_{app['id']}",
                 user_id=app['user_id'],
                 user_name=user.user_name if user else "",
                 user_group_infos=[UserGroupInfo(user_group_id=group.id, user_group_name=group.group_name)
@@ -167,6 +169,7 @@ def sync_mid_knowledge_increment(start_date: str = None, end_date: str = None):
         for knowledge in knowledge_list:
             user = user_map.get(knowledge.user_id, None)
             records.append(KnowledgeIncrementRecord(
+                es_id=f"knowledge_{knowledge.id}",
                 user_id=knowledge.user_id,
                 user_name=user.user_name if user else "",
                 user_group_infos=[UserGroupInfo(user_group_id=group.id, user_group_name=group.group_name)
@@ -204,8 +207,10 @@ def sync_mid_user_interact_dtl(start_date: str = None, end_date: str = None):
             break
         records = []
         for record in result:
+            es_id = record['_id']
             record = record['_source']
             records.append(UserInteractRecord(
+                es_id=es_id,
                 user_id=record['user_context']['user_id'],
                 user_name=record['user_context']['user_name'],
                 user_group_infos=[UserGroupInfo(user_group_id=group['user_group_id'],
@@ -213,7 +218,7 @@ def sync_mid_user_interact_dtl(start_date: str = None, end_date: str = None):
                                   for group in record['user_context'].get('user_group_infos', [])],
                 user_role_infos=[UserRoleInfo(role_id=role['role_id'],
                                               role_name=role['role_name'],
-                                              group_id=role['group_id'])
+                                              group_id=role.get('group_id', 0))
                                  for role in record['user_context'].get('user_role_infos', [])],
                 event_id=record['event_id'],
                 timestamp=record['timestamp'],

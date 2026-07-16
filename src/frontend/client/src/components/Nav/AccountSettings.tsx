@@ -3,7 +3,7 @@ import { Check, FileText, GanttChartIcon, Globe, LogOut } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 import { useRecoilState } from 'recoil';
 import { GearIcon, UserIcon } from '~/components/svg';
-import { useGetStartupConfig, useGetUserBalance } from '~/data-provider';
+import { useGetStartupConfig, useGetUserBalance } from '~/hooks/queries/data-provider';
 import { useLocalize } from '~/hooks';
 import { useAuthContext } from '~/hooks/AuthContext';
 import useAvatar from '~/hooks/Messages/useAvatar';
@@ -90,12 +90,12 @@ function AccountSettings() {
           </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent className='w-60 rounded-2xl'>
-          <a href={"/" + __APP_ENV__.BISHENG_HOST} target='_blank'>
+          {user?.plugins?.includes('backend') && <a href={__APP_ENV__.BISHENG_HOST} target='_blank'>
             <DropdownMenuItem className='select-item text-sm font-normal'>
               <GanttChartIcon className="icon-md" />
               {localize('com_nav_admin_panel')}
             </DropdownMenuItem>
-          </a>
+          </a>}
           <DropdownMenuSub>
             <DropdownMenuSubTrigger className='select-item text-sm font-normal'>
               <Globe className="icon-md" />

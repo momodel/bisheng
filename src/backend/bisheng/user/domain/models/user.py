@@ -21,6 +21,7 @@ class UserBase(SQLModelSerializable):
     phone_number: Optional[str] = Field(default=None, index=True)
     dept_id: Optional[str] = Field(default=None, index=True)
     remark: Optional[str] = Field(default=None, index=False)
+    avatar: Optional[str] = Field(default=None, index=False)
     delete: int = Field(default=0, index=False)
     create_time: Optional[datetime] = Field(default=None, sa_column=Column(
         DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP')))
@@ -32,7 +33,7 @@ class UserBase(SQLModelSerializable):
     def validate_str(cls, v):
         # dict_keys(['description', 'name', 'id', 'data'])
         if not v:
-            raise ValueError('user_name 不能为空')
+            raise ValueError('user_name Tidak boleh kosong.')
         return v
 
 
@@ -40,9 +41,9 @@ class User(UserBase, table=True):
     user_id: Optional[int] = Field(default=None, primary_key=True)
     password: str = Field(index=False)
     password_update_time: Optional[datetime] = Field(default=None, sa_column=Column(
-        DateTime, nullable=False, server_default=text('CURRENT_TIMESTAMP')), description='密码最近的修改时间')
+        DateTime, nullable=False, server_default=text('CURRENT_TIMESTAMP')), description='Password Last Modified')
 
-    # 定义groups和roles的查询关系
+    # DefinitiongroupsAndrolesQuery Relationships for
     groups: List["Group"] = Relationship(link_model=UserGroup)
     roles: List["Role"] = Relationship(link_model=UserRole)
 
@@ -54,7 +55,7 @@ class UserRead(UserBase):
     role: Optional[str] = None  # admin / group_admin
     access_token: Optional[str] = None
     web_menu: Optional[List[str]] = None
-    admin_groups: Optional[List[int]] = None  # 所管理的用户组ID列表
+    admin_groups: Optional[List[int]] = None  # Managed User GroupsIDVertical
 
 
 class UserQuery(UserBase):
@@ -76,6 +77,7 @@ class UserCreate(UserBase):
 
 class UserUpdate(SQLModelSerializable):
     user_id: int
+    avatar: Optional[str] = None
     delete: Optional[int] = 0
 
 
@@ -201,7 +203,7 @@ class UserDao(UserBase):
     @classmethod
     async def add_user_and_default_role(cls, user: User) -> User:
         """
-        新增用户，并添加默认角色
+        Add users and add default roles
         """
         async with get_async_db_session() as session:
             session.add(user)
@@ -216,7 +218,7 @@ class UserDao(UserBase):
     @classmethod
     async def add_user_and_admin_role(cls, user: User) -> User:
         """
-        新增用户，并添加超级管理员角色
+        Add users and add super admin roles
         """
         async with get_async_db_session() as session:
             session.add(user)
@@ -247,7 +249,7 @@ class UserDao(UserBase):
     @classmethod
     def get_all_users(cls, page: int = 0, limit: int = 0) -> List[User]:
         """
-        分页获取所有用户
+        Pagination Get All Users
         """
         statement = select(User)
         if page and limit:

@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from pydantic import field_validator
 from sqlalchemy import Column, DateTime, String, and_, func, or_, text
-from sqlmodel import JSON, Field, select, update
+from sqlmodel import JSON, Field, select, update, col
 
 from bisheng.common.constants.enums.telemetry import BaseTelemetryTypeEnum, ApplicationTypeEnum
 from bisheng.common.models.base import SQLModelSerializable
@@ -29,11 +29,12 @@ class FlowStatus(Enum):
 
 
 class FlowType(Enum):
-    FLOW = 1
     ASSISTANT = 5
     WORKFLOW = 10
     WORKSTATION = 15
-    LINSIGHT = 20  # 灵思模式
+    LINSIGHT = 20  # Inspiration Mode
+    CHANNEL_ARTICLE = 25  # Channel Article AI Assistant
+    KNOLEDGE_SPACE = 30
 
 
 class AppEnum(Enum):
@@ -53,7 +54,7 @@ class FlowBase(SQLModelSerializable):
     data: Optional[Dict] = Field(default=None)
     logo: Optional[str] = Field(default=None, index=False)
     status: Optional[int] = Field(index=False, default=1)
-    flow_type: Optional[int] = Field(index=False, default=1)
+    flow_type: Optional[int] = Field(index=False, default=FlowType.WORKFLOW.value)
     guide_word: Optional[str] = Field(default=None, sa_column=Column(String(length=1000)))
     create_time: Optional[datetime] = Field(default=None, sa_column=Column(
         DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP')))
@@ -113,7 +114,7 @@ class FlowDao(FlowBase):
         from bisheng.database.models.flow_version import FlowVersion
         with get_sync_db_session() as session:
             session.add(flow_info)
-            # 创建一个默认的版本
+            # Create a default version
             flow_version = FlowVersion(name='v0',
                                        is_current=1,
                                        data=flow_info.data,
@@ -125,9 +126,7 @@ class FlowDao(FlowBase):
             session.commit()
             session.refresh(flow_info)
 
-            if flow_type == FlowType.FLOW.value:
-                app_type = ApplicationTypeEnum.SKILL
-            elif flow_type == FlowType.WORKFLOW.value:
+            if flow_type == FlowType.WORKFLOW.value:
                 app_type = ApplicationTypeEnum.WORKFLOW
             elif flow_type == FlowType.ASSISTANT.value:
                 app_type = ApplicationTypeEnum.ASSISTANT
@@ -136,14 +135,14 @@ class FlowDao(FlowBase):
             else:
                 app_type = ApplicationTypeEnum.DAILY_CHAT
 
-            # 记录Telemetry日志
+            # RecordTelemetryJournal
             telemetry_service.log_event_sync(user_id=flow_info.user_id,
                                              event_type=BaseTelemetryTypeEnum.NEW_APPLICATION,
                                              trace_id=trace_id_var.get(),
                                              event_data=NewApplicationEventData(
                                                  app_id=flow_info.id,
                                                  app_name=flow_info.name,
-                                                 app_type=app_type.value
+                                                 app_type=app_type
                                              ))
 
             return flow_info
@@ -153,7 +152,7 @@ class FlowDao(FlowBase):
         from bisheng.database.models.flow_version import FlowVersion
         with get_sync_db_session() as session:
             session.delete(flow_info)
-            # 删除对应的版本信息
+            # Delete the corresponding version information
             update_statement = update(FlowVersion).where(
                 FlowVersion.flow_id == flow_info.id).values(is_delete=1)
             session.exec(update_statement)
@@ -188,6 +187,15 @@ class FlowDao(FlowBase):
             return session.exec(statement).all()
 
     @classmethod
+    async def aget_flow_by_ids(cls, flow_ids: List[str]) -> List[Flow]:
+        if not flow_ids:
+            return []
+        async with get_async_db_session() as session:
+            statement = select(Flow).where(col(Flow.id).in_(flow_ids))
+            result = await session.exec(statement)
+            return result.all()
+
+    @classmethod
     def get_flow_by_user(cls, user_id: int) -> List[Flow]:
         with get_sync_db_session() as session:
             statement = select(Flow).where(Flow.user_id == user_id)
@@ -210,9 +218,10 @@ class FlowDao(FlowBase):
                            page_num: int) -> List[Tuple[Flow, RoleAccess]]:
         statment = select(Flow, RoleAccess).join(RoleAccess,
                                                  and_(RoleAccess.role_id == role_id,
-                                                      RoleAccess.type == AccessType.FLOW.value,
+                                                      RoleAccess.type == AccessType.WORKFLOW.value,
                                                       RoleAccess.third_id == Flow.id),
                                                  isouter=True)
+        statment = statment.where(Flow.flow_type == FlowType.WORKFLOW.value)
 
         if name:
             statment = statment.where(Flow.name.like('%' + name + '%'))
@@ -240,7 +249,7 @@ class FlowDao(FlowBase):
                   limit: int = 0,
                   flow_type: Optional[int] = None) -> List[Flow]:
         with get_sync_db_session() as session:
-            # data 数据量太大，对mysql 有影响
+            # data The amount of data is too large, yesmysql Influential
             statement = select(Flow.id, Flow.user_id, Flow.name, Flow.status, Flow.create_time,
                                Flow.logo, Flow.update_time, Flow.description, Flow.guide_word,
                                Flow.flow_type)
@@ -291,30 +300,13 @@ class FlowDao(FlowBase):
             return count_statement.scalar()
 
     @classmethod
-    def get_all_online_flows(cls,
-                             keyword: str = None,
-                             flow_ids: List[str] = None,
-                             flow_type: int = FlowType.FLOW.value) -> List[Flow]:
-        with get_sync_db_session() as session:
-            statement = select(Flow.id, Flow.user_id, Flow.name, Flow.status, Flow.create_time,
-                               Flow.logo, Flow.update_time, Flow.description,
-                               Flow.guide_word).where(Flow.status == FlowStatus.ONLINE.value)
-            if flow_ids:
-                statement = statement.where(Flow.id.in_(flow_ids))
-            if keyword:
-                statement = statement.where(
-                    or_(Flow.name.like(f'%{keyword}%'), Flow.description.like(f'%{keyword}%')))
-            result = session.exec(statement).mappings().all()
-            return [Flow.model_validate(f) for f in result]
-
-    @classmethod
     def get_user_access_online_flows(cls,
                                      user_id: int,
                                      page: int = 0,
                                      limit: int = 0,
                                      keyword: str = None,
                                      flow_ids: List[str] = None,
-                                     flow_type: int = FlowType.FLOW.value) -> List[Flow]:
+                                     flow_type: int = FlowType.WORKFLOW.value) -> List[Flow]:
         user_role = UserRoleDao.get_user_roles(user_id)
         flow_id_extra = []
         if user_role:
@@ -323,7 +315,7 @@ class FlowDao(FlowBase):
                 # admin
                 flow_id_extra = 'admin'
             else:
-                role_access = RoleAccessDao.get_role_access(role_ids, AccessType.FLOW)
+                role_access = RoleAccessDao.get_role_access(role_ids, AccessType.WORKFLOW)
                 if role_access:
                     flow_id_extra = [access.third_id for access in role_access]
         return FlowDao.get_flows(user_id,
@@ -337,10 +329,10 @@ class FlowDao(FlowBase):
 
     @classmethod
     def filter_flows_by_ids(cls, flow_ids: List[str], keyword: str = None,
-                            page: int = 0, limit: int = 0, flow_type: int = FlowType.FLOW.value) \
+                            page: int = 0, limit: int = 0, flow_type: int = FlowType.WORKFLOW.value) \
             -> (List[Flow], int):
         """
-        通过技能ID过滤技能列表，只返回简略信息，不包含data
+        Filter flow records by ids and return brief information without graph data.
         """
         statement = select(Flow.id, Flow.user_id, Flow.name, Flow.status, Flow.create_time,
                            Flow.update_time, Flow.description, Flow.guide_word)
@@ -388,7 +380,7 @@ class FlowDao(FlowBase):
                      id_list_not_in: list = None,
                      page: int = 0,
                      limit: int = 0) -> (List[Dict], int):
-        """ 获取所有的应用 包含技能、助手、工作流 """
+        """Get all flow-based apps and assistants."""
         sub_query = select(
             Flow.id, Flow.name, Flow.description, Flow.flow_type, Flow.logo, Flow.user_id,
             Flow.status, Flow.create_time, Flow.update_time).union_all(
@@ -430,6 +422,92 @@ class FlowDao(FlowBase):
         with (get_sync_db_session() as session):
             ret = session.exec(statement).all()
             total = session.scalar(count_statement)
+        data = []
+        for one in ret:
+            data.append({
+                'id': one[0],
+                'name': one[1],
+                'description': one[2],
+                'flow_type': one[3],
+                'logo': one[4],
+                'user_id': one[5],
+                'status': one[6],
+                'create_time': one[7],
+                'update_time': one[8]
+            })
+        return data, total
+
+    @classmethod
+    async def aget_all_apps(cls,
+                            name: str = None,
+                            status: int = None,
+                            id_list: list = None,
+                            flow_type: int = None,
+                            user_id: int = None,
+                            id_extra: list = None,
+                            id_list_not_in: list = None,
+                            page: int = 0,
+                            limit: int = 0) -> (List[Dict], int):
+        """
+        Get all flow-based apps and assistants.
+        Args:
+            name:
+            status:
+            id_list:
+            flow_type:
+            user_id:
+            id_extra:
+            id_list_not_in:
+            page:
+            limit:
+
+        Returns:
+            (List[Dict], int)
+        """
+        sub_query = select(
+            Flow.id, Flow.name, Flow.description, Flow.flow_type, Flow.logo, Flow.user_id,
+            Flow.status, Flow.create_time, Flow.update_time).union_all(
+            select(Assistant.id, Assistant.name, Assistant.desc, FlowType.ASSISTANT.value,
+                   Assistant.logo, Assistant.user_id, Assistant.status, Assistant.create_time,
+                   Assistant.update_time).where(Assistant.is_delete == 0)).subquery()
+
+        statement = select(sub_query.c.id, sub_query.c.name, sub_query.c.description,
+                           sub_query.c.flow_type, sub_query.c.logo, sub_query.c.user_id,
+                           sub_query.c.status, sub_query.c.create_time, sub_query.c.update_time)
+        count_statement = select(func.count(sub_query.c.id))
+        if name:
+            statement = statement.where(sub_query.c.name.like(f'%{name}%'))
+            count_statement = count_statement.where(sub_query.c.name.like(f'%{name}%'))
+        if status is not None:
+            statement = statement.where(sub_query.c.status == status)
+            count_statement = count_statement.where(sub_query.c.status == status)
+        if id_list:
+            statement = statement.where(sub_query.c.id.in_(id_list))
+            count_statement = count_statement.where(sub_query.c.id.in_(id_list))
+        if flow_type is not None:
+            statement = statement.where(sub_query.c.flow_type == flow_type)
+            count_statement = count_statement.where(sub_query.c.flow_type == flow_type)
+        if user_id is not None:
+            if id_extra:
+                statement = statement.where(
+                    or_(sub_query.c.user_id == user_id, sub_query.c.id.in_(id_extra)))
+                count_statement = count_statement.where(
+                    or_(sub_query.c.user_id == user_id, sub_query.c.id.in_(id_extra)))
+            else:
+                statement = statement.where(sub_query.c.user_id == user_id)
+                count_statement = count_statement.where(sub_query.c.user_id == user_id)
+        if id_list_not_in:
+            statement = statement.where(~sub_query.c.id.in_(id_list_not_in))
+            count_statement = count_statement.where(~sub_query.c.id.in_(id_list_not_in))
+        if page and limit:
+            statement = statement.offset((page - 1) * limit).limit(limit)
+        statement = statement.order_by(sub_query.c.update_time.desc())
+
+        async with get_async_db_session() as session:
+            result = await session.exec(statement)
+            ret = result.all()
+            total_result = await session.exec(count_statement)
+            total = total_result.first()
         data = []
         for one in ret:
             data.append({

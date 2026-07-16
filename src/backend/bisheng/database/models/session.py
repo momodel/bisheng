@@ -2,31 +2,37 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List
 
-from sqlmodel import Field, Column, DateTime, text, select, func, update
+from sqlalchemy import JSON
+from sqlmodel import Field, Column, DateTime, text, select, func, update, col
 
 from bisheng.common.models.base import SQLModelSerializable
 from bisheng.core.database import get_sync_db_session, get_async_db_session
+from bisheng.database.models.user_group import UserGroupDao
 
 
 class SensitiveStatus(Enum):
-    PASS = 1  # 通过
-    VIOLATIONS = 2  # 违规
+    PASS = 1  # Setuju
+    VIOLATIONS = 2  # violates regulation
 
 
 class MessageSessionBase(SQLModelSerializable):
-    """ 会话表 """
-    chat_id: str = Field(default=None, primary_key=True, description='会话唯一ID')
-    flow_id: str = Field(index=True, description='应用唯一ID')
-    flow_type: int = Field(description='应用类型。技能、助手、工作流')
-    flow_name: str = Field(index=True, description='应用名称')
-    flow_description: Optional[str] = Field(default=None, description='应用描述')
-    flow_logo: Optional[str] = Field(default=None, description='应用logo')
-    user_id: int = Field(index=True, description='创建会话的用户ID')
-    is_delete: Optional[bool] = Field(default=False, description='对应的技能或者会话本身是否被删除')
-    like: Optional[int] = Field(default=0, description='点赞的消息数量')
-    dislike: Optional[int] = Field(default=0, description='点踩的消息数量')
-    copied: Optional[int] = Field(default=0, description='已复制的消息数量')
-    sensitive_status: int = Field(default=SensitiveStatus.PASS.value, description='审查状态')
+    """ Conversation table """
+    chat_id: str = Field(default=None, primary_key=True, description='Session UniqueID')
+    name: Optional[str] = Field(default="", description='SessionName')
+    flow_id: str = Field(default="", index=True, description='Apply UniqueID')
+    flow_type: int = Field(description='App type. Skills, assistants, workflows')
+    flow_name: str = Field(default="", index=True, description='Application name')
+    flow_description: Optional[str] = Field(default=None, description='App Description')
+    flow_logo: Optional[str] = Field(default=None, description='Applicationslogo')
+    user_id: int = Field(index=True, description='User who created the sessionID')
+    group_ids: Optional[List[int]] = Field(default=None, sa_column=Column(JSON),
+                                           description="Belongs to a user groupIDVertical")
+    is_delete: Optional[bool] = Field(default=False,
+                                      description='Whether the corresponding skill or the session itself was deleted')
+    like: Optional[int] = Field(default=0, description='Number of liked messages')
+    dislike: Optional[int] = Field(default=0, description='Number of messages clicked')
+    copied: Optional[int] = Field(default=0, description='Number of messages copied')
+    sensitive_status: int = Field(default=SensitiveStatus.PASS.value, description='Review Status')
     create_time: Optional[datetime] = Field(default=None, sa_column=Column(
         DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP')))
     update_time: Optional[datetime] = Field(default=None, sa_column=Column(
@@ -41,6 +47,11 @@ class MessageSessionDao(MessageSessionBase):
 
     @classmethod
     def insert_one(cls, data: MessageSession) -> MessageSession:
+
+        if not data.group_ids:
+            user_groups = UserGroupDao.get_user_group(data.user_id)
+            data.group_ids = [ug.group_id for ug in user_groups]
+
         with get_sync_db_session() as session:
             session.add(data)
             session.commit()
@@ -49,6 +60,11 @@ class MessageSessionDao(MessageSessionBase):
 
     @classmethod
     async def async_insert_one(cls, data: MessageSession) -> MessageSession:
+
+        if not data.group_ids:
+            user_groups = await UserGroupDao.aget_user_group(data.user_id)
+            data.group_ids = [ug.group_id for ug in user_groups]
+
         async with get_async_db_session() as session:
             session.add(data)
             await session.commit()
@@ -56,11 +72,11 @@ class MessageSessionDao(MessageSessionBase):
             return data
 
     @classmethod
-    def delete_session(cls, chat_id: str):
+    async def delete_session(cls, chat_id: str):
         statement = update(MessageSession).where(MessageSession.chat_id == chat_id).values(is_delete=True)
-        with get_sync_db_session() as session:
-            session.exec(statement)
-            session.commit()
+        async with get_async_db_session() as session:
+            await session.exec(statement)
+            await session.commit()
 
     @classmethod
     def get_one(cls, chat_id: str) -> MessageSession | None:
@@ -129,7 +145,45 @@ class MessageSessionDao(MessageSessionBase):
                        exclude_chats: List[str] = None,
                        page: int = 0,
                        limit: int = 0,
-                       flow_type: List[int] = None) -> List[MessageSession]:
+                       flow_type: List[int] = None,
+                       order_by_update_time: bool = False) -> List[MessageSession]:
+        statement = select(MessageSession)
+        statement = cls.generate_filter_session_statement(statement,
+                                                          chat_ids,
+                                                          sensitive_status,
+                                                          flow_ids,
+                                                          user_ids,
+                                                          feedback,
+                                                          start_date,
+                                                          end_date,
+                                                          include_delete,
+                                                          exclude_chats,
+                                                          flow_type=flow_type)
+        if page and limit:
+            statement = statement.offset((page - 1) * limit).limit(limit)
+        # Order by update_time or create_time
+        if order_by_update_time:
+            statement = statement.order_by(MessageSession.update_time.desc())
+        else:
+            statement = statement.order_by(MessageSession.create_time.desc())
+        with get_sync_db_session() as session:
+            return session.exec(statement).all()
+
+    @classmethod
+    async def afilter_session(cls,
+                              chat_ids: List[str] = None,
+                              sensitive_status: List[SensitiveStatus] = None,
+                              flow_ids: List[str] = None,
+                              user_ids: List[int] = None,
+                              feedback: str = None,
+                              start_date: datetime = None,
+                              end_date: datetime = None,
+                              include_delete: bool = True,
+                              exclude_chats: List[str] = None,
+                              page: int = 0,
+                              limit: int = 0,
+                              flow_type: List[int] = None) -> List[MessageSession]:
+
         statement = select(MessageSession)
         statement = cls.generate_filter_session_statement(statement,
                                                           chat_ids,
@@ -145,27 +199,46 @@ class MessageSessionDao(MessageSessionBase):
         if page and limit:
             statement = statement.offset((page - 1) * limit).limit(limit)
         statement = statement.order_by(MessageSession.create_time.desc())
-        with get_sync_db_session() as session:
-            return session.exec(statement).all()
+
+        async with get_async_db_session() as session:
+            result = await session.exec(statement)
+            return result.all()
 
     @classmethod
-    def filter_session_count(cls,
-                             chat_ids: List[str] = None,
-                             sensitive_status: List[SensitiveStatus] = None,
-                             flow_ids: List[str] = None,
-                             user_ids: List[int] = None,
-                             feedback: str = None,
-                             start_date: datetime = None,
-                             end_date: datetime = None,
-                             include_delete: bool = True,
-                             exclude_chats: List[str] = None,
-                             flow_type: List[int] = None) -> int:
+    async def get_statement_results(cls, statement, page: int = 0, limit: int = 0) -> List[MessageSession]:
+        if page and limit:
+            statement = statement.offset((page - 1) * limit).limit(limit)
+        statement = statement.order_by(MessageSession.create_time.desc())
+        async with get_async_db_session() as session:
+            result = await session.exec(statement)
+            return result.all()
+
+    @classmethod
+    async def get_statement_count(cls, statement) -> int:
+        count_statement = select(func.count()).select_from(statement.subquery())
+        async with get_async_db_session() as session:
+            result = await session.exec(count_statement)
+            return result.first()
+
+    @classmethod
+    async def filter_session_count(cls,
+                                   chat_ids: List[str] = None,
+                                   sensitive_status: List[SensitiveStatus] = None,
+                                   flow_ids: List[str] = None,
+                                   user_ids: List[int] = None,
+                                   feedback: str = None,
+                                   start_date: datetime = None,
+                                   end_date: datetime = None,
+                                   include_delete: bool = True,
+                                   exclude_chats: List[str] = None,
+                                   flow_type: List[int] = None) -> int:
         statement = select(func.count(MessageSession.chat_id))
         statement = cls.generate_filter_session_statement(statement, chat_ids, sensitive_status,
                                                           flow_ids, user_ids, feedback, start_date,
                                                           end_date, include_delete, exclude_chats, flow_type=flow_type)
-        with get_sync_db_session() as session:
-            return session.scalar(statement)
+        async with get_async_db_session() as session:
+            result = await session.exec(statement)
+            return result.first()
 
     @classmethod
     def update_sensitive_status(cls, chat_id: str, sensitive_status: SensitiveStatus):
@@ -218,3 +291,75 @@ class MessageSessionDao(MessageSessionBase):
         with get_sync_db_session() as session:
             session.exec(statement)
             session.commit()
+
+    @classmethod
+    async def update_session_name(cls, chat_id: str, name: str):
+        statement = update(MessageSession).where(col(MessageSession.chat_id) == chat_id).values(
+            name=name,
+            update_time=datetime.now()
+        )
+        async with get_async_db_session() as session:
+            await session.exec(statement)
+            await session.commit()
+
+    @classmethod
+    async def touch_session(cls, chat_id: str):
+        statement = update(MessageSession).where(col(MessageSession.chat_id) == chat_id).values(
+            update_time=datetime.now()
+        )
+        async with get_async_db_session() as session:
+            await session.exec(statement)
+            await session.commit()
+
+    @classmethod
+    def update_session_name_sync(cls, chat_id: str, name: str):
+        statement = update(MessageSession).where(col(MessageSession.chat_id) == chat_id).values(
+            name=name,
+            update_time=datetime.now()
+        )
+        with get_sync_db_session() as session:
+            session.exec(statement)
+            session.commit()
+
+    @classmethod
+    async def get_user_used_apps(cls, user_id: int = None, flow_types: List[int] = None,
+                                 use_create_time: bool = False) -> List[tuple]:
+        """
+        Query the list of apps used by the user (or all users if user_id is None).
+        Deduplicate by flow_id, keeping the record with the latest time.
+
+        Args:
+            user_id: User ID, or None to query across all users
+            flow_types: List of flow types to filter (e.g., [FlowType.ASSISTANT.value, FlowType.WORKFLOW.value])
+            use_create_time: If True, use create_time instead of update_time
+
+        Returns:
+            List of tuples: [(flow_id, last_used_time, flow_type), ...]
+        """
+        # Subquery: get the max time for each flow_id
+        time_col = MessageSession.create_time if use_create_time else MessageSession.update_time
+        conditions = [MessageSession.is_delete == False]  # noqa
+        if user_id is not None:
+            conditions.append(MessageSession.user_id == user_id)
+
+        subquery = select(
+            MessageSession.flow_id,
+            func.max(time_col).label('last_used_time'),
+            MessageSession.flow_type
+        ).where(*conditions)
+
+        if flow_types:
+            subquery = subquery.where(MessageSession.flow_type.in_(flow_types))
+
+        subquery = subquery.group_by(MessageSession.flow_id, MessageSession.flow_type).subquery()
+
+        # Main query: order by last_used_time desc
+        statement = select(
+            subquery.c.flow_id,
+            subquery.c.last_used_time,
+            subquery.c.flow_type
+        ).order_by(subquery.c.last_used_time.desc())
+
+        async with get_async_db_session() as session:
+            result = await session.exec(statement)
+            return result.all()

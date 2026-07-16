@@ -5,17 +5,17 @@ from sqlalchemy import Column, DateTime, delete, text, update
 from sqlmodel import Field, select
 
 from bisheng.common.models.base import SQLModelSerializable
-from bisheng.core.database import get_sync_db_session
+from bisheng.core.database import get_sync_db_session, get_async_db_session
 
-# 默认用户组的ID
+# Default User GroupID
 DefaultGroup = 2
 
 
 class GroupBase(SQLModelSerializable):
-    group_name: str = Field(index=False, description='前端展示名称', unique=True)
+    group_name: str = Field(index=False, description='Frontend Display Name', unique=True)
     remark: Optional[str] = Field(default=None, index=False)
-    create_user: Optional[int] = Field(default=None, index=True, description="创建用户的ID")
-    update_user: Optional[int] = Field(default=None, description="更新用户的ID")
+    create_user: Optional[int] = Field(default=None, index=True, description="Creating a user'sID")
+    update_user: Optional[int] = Field(default=None, description="Update user'sID")
     create_time: Optional[datetime] = Field(default=None, sa_column=Column(
         DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP')))
     update_time: Optional[datetime] = Field(default=None, sa_column=Column(
@@ -23,7 +23,7 @@ class GroupBase(SQLModelSerializable):
 
 
 class Group(GroupBase, table=True):
-    # id = 2 表示默认用户组
+    # id = 2 Represents the default user group
     id: Optional[int] = Field(default=None, primary_key=True)
 
 
@@ -71,6 +71,15 @@ class GroupDao(GroupBase):
         with get_sync_db_session() as session:
             statement = select(Group).where(Group.id.in_(ids)).order_by(Group.update_time.desc())
             return session.exec(statement).all()
+
+    @classmethod
+    async def aget_group_by_ids(cls, ids: List[int]) -> list[Group]:
+        if not ids:
+            raise ValueError('ids is empty')
+        async with get_async_db_session() as session:
+            statement = select(Group).where(Group.id.in_(ids)).order_by(Group.update_time.desc())
+            result = await session.exec(statement)
+            return result.all()
 
     @classmethod
     def delete_group(cls, group_id: int):

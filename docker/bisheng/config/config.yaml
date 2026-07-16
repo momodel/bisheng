@@ -4,6 +4,7 @@ database_url:
   "mysql+pymysql://root:gAAAAABpgAdm7zO_kY_r0jeo4eFu0Av0rVNyutoHLDH3nCxXfF0FTYSj8iqdYYz1e7TYnyfuc9z8WkrXErm-6g9wwkGagUsfsw==@mysql:3306/bisheng?charset=utf8mb4"
 
 # 缓存配置  redis://[[username]:[password]]@localhost:6379/0
+# 如果设置了密码，需要参考MySQL密码的加密逻辑对密码进行加密。eg: redis://root:gAAAAABlp4b4c59FeVGF_OQRVf6NOUIGdxq8246EBD-b0hdK_jVKRs1x4PoAn0A6C5S6IiFKmWn0Nm5eBUWu-7jxcqw6TiVjQA==@redis:6379/0
 # 普通模式:
 redis_url: "redis://:gAAAAABqHjEUZwNZRk4gTn4YBosv33gK5WA4-f4-WONPouHxfkLBLN5tjSjeUQWvvptcEqJ132OF7rpPbfap_AmTdq1qw8fo8g==@redis:6379/1"
 
