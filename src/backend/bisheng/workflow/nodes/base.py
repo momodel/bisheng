@@ -1,5 +1,6 @@
 import base64
 import copy
+import mimetypes
 import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
@@ -167,6 +168,16 @@ class BaseNode(ABC):
             base64_data = base64.b64encode(file_data).decode('utf-8')
         return base64_data
 
+    @classmethod
+    def get_file_data_url(cls, file_path: str) -> str:
+        if file_path.startswith(('http://', 'https://')):
+            file_path, _ = file_download(file_path)
+
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type or not mime_type.startswith('image/'):
+            mime_type = 'image/jpeg'
+        return f'data:{mime_type};base64,{cls.get_file_base64_data(file_path)}'
+
     def contact_file_into_prompt(self, human_message: HumanMessage, variable_list: List[str]) -> HumanMessage:
         if not variable_list:
             if isinstance(human_message.content, list):
@@ -177,12 +188,11 @@ class BaseNode(ABC):
             if not image_value:
                 continue
             for file_path in image_value:
-                base64_image = self.get_file_base64_data(file_path)
                 human_message.content.append({
-                    "type": "image",
-                    "source_type": "base64",
-                    "mime_type": "image/jpeg",
-                    "data": base64_image,
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': self.get_file_data_url(file_path),
+                    },
                 })
         return human_message
 
