@@ -130,7 +130,7 @@ export default function MainLayout() {
             <div className="flex" style={{ height: "calc(100vh - 64px)" }}>
                 <div className="relative z-10 bg-background-main h-full w-[184px] min-w-[184px] px-3  shadow-x1 flex justify-between text-center ">
                     <nav className="">
-                        {appConfig.benchMenu && (
+                        {appConfig.benchMenu && isMenu('frontend') && (
                             <a
                                 href={`${(__APP_ENV__.BASE_URL === '/' ? '' : __APP_ENV__.BASE_URL) + '/workspace/'}`}  // 直接使用根路径
                                 target="_blank"
