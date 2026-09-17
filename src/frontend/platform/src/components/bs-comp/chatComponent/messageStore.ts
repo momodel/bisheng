@@ -1,8 +1,10 @@
+// @ts-strict-ignore
 import { getChatHistory } from '@/controllers/API';
 import { ChatMessageType } from '@/types/chat';
 import { formatDate } from '@/util/utils';
 import cloneDeep from 'lodash-es/cloneDeep';
 import { create } from 'zustand';
+import { normalizeCitationItems } from './citationUtils';
 
 /**
  * 会话消息管理
@@ -39,6 +41,7 @@ type Actions = {
     insetSystemMsg: (text: string) => void;
     insetBsMsg: (text: string) => void;
     setShowGuideQuestion: (text: boolean) => void;
+    closeDanglingRunLogs: () => void;
     clearMsgs: () => void;
 }
 
@@ -82,6 +85,7 @@ const handleHistoryMsg = (data: any[]): ChatMessageType[] => {
             isSend: !is_bot,
             message,
             thought: intermediate_steps,
+            citations: normalizeCitationItems(other),
             noAccess: true
         }
     })
@@ -89,6 +93,18 @@ const handleHistoryMsg = (data: any[]): ChatMessageType[] => {
 
 let currentChatId = ''
 const runLogsTypes = ['tool', 'flow', 'knowledge']
+
+const mergeStreamText = (current: unknown, incoming: unknown) => {
+    const currentText = typeof current === 'string' ? current : String(current || '')
+    const incomingText = typeof incoming === 'string' ? incoming : String(incoming || '')
+
+    if (!incomingText) return currentText
+    if (!currentText) return incomingText
+
+    // 兼容后端发送完整快照和增量片段两种流式协议
+    return incomingText.startsWith(currentText) ? incomingText : currentText + incomingText
+}
+
 export const useMessageStore = create<State & Actions>((set, get) => ({
     running: false,
     chatId: '',
@@ -137,6 +153,24 @@ export const useMessageStore = create<State & Actions>((set, get) => ({
             set({ historyEnd: true })
         }
     },
+    /**
+     * A tool card only closes when its `end` frame arrives. Lose one — a
+     * serialization failure, a dropped socket — and the card spins forever, with
+     * nothing to recover it: the round is over and nothing was persisted. So on
+     * session close, settle whatever is still open and mark it interrupted
+     * rather than leaving a success tick it never earned.
+     */
+    closeDanglingRunLogs() {
+        const messages = get().messages
+        if (!messages.some(msg => runLogsTypes.includes(msg.category) && !msg.end)) return
+        set({
+            messages: messages.map(msg =>
+                runLogsTypes.includes(msg.category) && !msg.end
+                    ? { ...msg, end: true, interrupted: true }
+                    : msg
+            )
+        })
+    },
     clearMsgs() {
         setTimeout(() => {
             set({ hisMessages: [], messages: [], historyEnd: true })
@@ -167,7 +201,7 @@ export const useMessageStore = create<State & Actions>((set, get) => ({
     createWsMsg(data) {
         console.log('change createWsMsg');
         set((state) => {
-            let newChat = cloneDeep(state.messages);
+            const newChat = cloneDeep(state.messages);
             newChat.push({
                 isSend: false,
                 message: runLogsTypes.includes(data.category) ? JSON.parse(data.message) : '',
@@ -178,6 +212,7 @@ export const useMessageStore = create<State & Actions>((set, get) => ({
                 end: false,
                 user_name: '',
                 extra: data.extra,
+                citations: normalizeCitationItems(data),
                 reasoning_log: ''
             })
             return { messages: newChat }
@@ -215,10 +250,10 @@ export const useMessageStore = create<State & Actions>((set, get) => ({
         if (isRunLog) {
             message = JSON.parse(wsdata.message)
         } else if (typeof wsdata.message !== 'string' && wsdata.message && 'reasoning_content' in wsdata.message) {
-            message = currentMessage.message + (wsdata.message.content || '')
-            reasoning_log += (wsdata.message.reasoning_content || '')
+            message = mergeStreamText(currentMessage.message, wsdata.message.content)
+            reasoning_log = mergeStreamText(reasoning_log, wsdata.message.reasoning_content)
         } else {
-            message = currentMessage.message + (wsdata.message || '')
+            message = mergeStreamText(currentMessage.message, wsdata.message)
         }
 
         // 敏感词特殊处理
@@ -228,21 +263,27 @@ export const useMessageStore = create<State & Actions>((set, get) => ({
             })
             cover = false
         }
+        // wsdata.messageId only carries the real DB id on the end branch (set by
+        // the ChatInput end handler). When present it MUST overwrite any temp id
+        // assigned during streaming — otherwise like/telemetry calls keep using
+        // the temp id and the backend silently drops the audit record.
+        const realMessageId = !isRunLog && wsdata.messageId
         const newCurrentMessage = {
             ...currentMessage,
             ...wsdata,
-            id: currentMessage.id || (isRunLog ? wsdata.extra : wsdata.messageId), // 每条消息必唯一
+            id: realMessageId || currentMessage.id || (isRunLog ? wsdata.extra : undefined),
             message,
             reasoning_log,
             thought: currentMessage.thought + (wsdata.thought ? `${wsdata.thought}\n` : ''),
             files: wsdata.files || [],
             category: wsdata.category || '',
-            source: wsdata.source
+            source: wsdata.source,
+            citations: normalizeCitationItems(wsdata) || currentMessage.citations || null
         }
-        // 无id补上（如文件解析完成消息，后端无返回messageid）
+        // Fallback: assign a recognisable temp id so React keys stay unique while
+        // streaming, without polluting downstream calls that need a real DB id.
         if (!newCurrentMessage.id) {
-            newCurrentMessage.id = Math.random() * 1000000
-            // console.log('msg:', newCurrentMessage);
+            newCurrentMessage.id = 'tmp-' + Math.random().toString(36).slice(2, 10)
         }
 
         messages[currentMessageIndex] = newCurrentMessage
@@ -286,6 +327,25 @@ export const useMessageStore = create<State & Actions>((set, get) => ({
                 }
             }
 
+        }
+        // Safety net: when the backend emits a real DB message_id (typically on
+        // end / end_cover for `answer`), force-stamp it onto the latest non-runLog
+        // bot message that still carries a temp id. This guards against the
+        // cover/pop branches above swallowing the id.
+        const dbId = wsdata?.messageId
+        if (dbId && !isRunLog) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+                const m = messages[i]
+                if (m?.isSend) break
+                if (runLogsTypes.includes(m.category)) continue
+                const idStr = String(m.id ?? '')
+                const idMissingOrTemp =
+                    !m.id || idStr.startsWith('tmp-') || idStr.startsWith('u-')
+                if (idMissingOrTemp) {
+                    m.id = dbId
+                }
+                break
+            }
         }
         set((state) => ({ messages: [...messages] }))
     },

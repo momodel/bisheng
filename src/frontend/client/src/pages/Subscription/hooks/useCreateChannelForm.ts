@@ -6,8 +6,8 @@ import type { FilterGroup, FilterRelation } from "../CreateChannel/FilterConditi
 import type { SubChannelData } from "../CreateChannel/SubChannelBlock";
 import { generateUUID } from "~/utils";
 
-const MAX_CHANNEL_NAME = 10;
-const MAX_SUB_CHANNELS = 6;
+const MAX_CHANNEL_NAME = 50;
+const MAX_SUB_CHANNELS = 10;
 
 type VisibilityType = "private" | "review" | "public";
 type PublishToSquare = "yes" | "no";
@@ -88,6 +88,8 @@ function maxDefaultSubChannelIndex(
 
 export function useCreateChannelForm() {
     const localize = useLocalize();
+    const localizeRef = useRef(localize);
+    localizeRef.current = localize;
     const subChannelNameSeqRef = useRef(0);
     // Form fields
     const [sources, setSources] = useState<InformationSource[]>([]);
@@ -186,7 +188,7 @@ export function useCreateChannelForm() {
             // 以 name 分组，每个 name 一个子频道
             const groupedByName = new Map<string, typeof subRules>();
             for (const g of subRules) {
-                const key = (g.name as string) || localize("com_subscription.sub_channel_name");
+                const key = (g.name as string) || localizeRef.current("com_subscription.sub_channel_name");
                 if (!groupedByName.has(key)) {
                     groupedByName.set(key, []);
                 }
@@ -209,13 +211,13 @@ export function useCreateChannelForm() {
             }
 
             setSubChannels(nextSubChannels);
-            subChannelNameSeqRef.current = maxDefaultSubChannelIndex(nextSubChannels, localize);
+            subChannelNameSeqRef.current = maxDefaultSubChannelIndex(nextSubChannels, localizeRef.current);
         } else {
             setCreateSubChannel(false);
             setSubChannels([]);
             subChannelNameSeqRef.current = 0;
         }
-    }, [localize]);
+    }, []);
 
     const loadSourcesByIds = useCallback(async (ids: string[]) => {
         if (!ids || ids.length === 0) {

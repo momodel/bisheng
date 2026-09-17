@@ -2,7 +2,7 @@
 // source: https://plainenglish.io/blog/light-and-dark-mode-in-react-web-application-with-tailwind-css-89674496b942
 import { useSetRecoilState } from 'recoil';
 import React, { createContext, useState, useEffect } from 'react';
-import { getInitialTheme, applyFontSize } from '~/utils';
+import { getInitialTheme, applyFontSize, applyBrandTheme, getInitialBrand } from '~/utils';
 import store from '~/store';
 
 type ProviderValue = {
@@ -54,6 +54,11 @@ export const ThemeProvider = ({ initialTheme, children }) => {
     };
   }, []);
 
+  // Apply the persisted brand (accent) color on startup, before the menu mounts.
+  useEffect(() => {
+    applyBrandTheme(getInitialBrand());
+  }, []);
+
   useEffect(() => {
     const fontSize = localStorage.getItem('fontSize');
     if (fontSize == null) {
@@ -62,7 +67,17 @@ export const ThemeProvider = ({ initialTheme, children }) => {
       localStorage.setItem('fontSize', 'text-base');
       return;
     }
-    applyFontSize(JSON.parse(fontSize));
+    // `fontSize` is persisted as a plain class string (see the null branch above).
+    // Tolerate a legacy JSON-encoded value ('"text-base"') too, and never throw on
+    // a plain string — JSON.parse('text-base') would crash the whole ThemeProvider.
+    let size = fontSize;
+    try {
+      const parsed = JSON.parse(fontSize);
+      if (typeof parsed === 'string') size = parsed;
+    } catch {
+      /* already a plain class string */
+    }
+    applyFontSize(size);
     // Reason: This effect should only run once, and `setFontSize` is a stable function
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { createContext, ReactNode, useEffect, useState } from "react";
 import { getAppConfig, getWorkstationConfigApi } from "../controllers/API";
 
@@ -85,8 +86,11 @@ export function LocationProvider({ children }: { children: ReactNode }) {
           chatPrompt: !!res.application_usage_tips,
           noFace: !res.show_github_and_help,
           register: !!res.enable_registration,
-          uploadFileMaxSize: res.uploaded_files_maximum_size || 200,
-          enableEtl4lm: res.enable_etl4lm
+          uploadFileMaxSize: res.uploaded_files_maximum_size || 50,
+          uploadMediaMaxSize: res.uploaded_media_maximum_size ?? 1024,
+          enableMediaUpload: !!res.enable_media_upload,
+          enableEtl4lm: res.enable_etl4lm,
+          multiTenantEnabled: !!res.multi_tenant_enabled
         }));
 
         // backend version

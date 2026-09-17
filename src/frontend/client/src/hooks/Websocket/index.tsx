@@ -1,6 +1,7 @@
+// @ts-strict-ignore
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { userInputLinsightEvent, userStopLinsightEvent } from "~/api/linsight";
-import { SopStatus } from "~/components/Sop/SOPEditor";
+import { getLinsightSessionVersionList, userInputLinsightEvent, userStopLinsightEvent } from "~/api/linsight";
+import { SopStatus } from "~/store/linsight";
 import { useToastContext } from "~/Providers";
 import { toggleNav } from "~/utils";
 import { useLinsightManager } from "../useLinsightManager";
@@ -11,7 +12,7 @@ const MOCK = false
 const connections: Record<string, WebSocket> = {};
 
 export const useLinsightWebSocket = (versionId) => {
-    const { getLinsight, updateLinsight } = useLinsightManager()
+    const { getLinsight, updateLinsight, reconcileLinsightFromServer } = useLinsightManager()
     const { showToast } = useToastContext();
     const maxRetryCountRef = useRef(5);
 
@@ -25,11 +26,26 @@ export const useLinsightWebSocket = (versionId) => {
 
     // 使用 ref 存储当前活跃版本 ID
     const activeVersionIdRef = useRef(versionId);
+    // Live mirror of task.running, read inside the (stable, []-deps) connect
+    // callback's onclose retry to avoid a stale closure and to gate reconnects.
+    const runningRef = useRef(false);
+    // Same reason: the connect callback must reach the CURRENT reconcile fn
+    // without taking it as a dependency (that would rebuild connect and break
+    // the self-referencing reconnect below).
+    const reconcileRef = useRef(reconcileLinsightFromServer);
 
     // 同步最新活跃版本 ID
     useEffect(() => {
         activeVersionIdRef.current = versionId;
     }, [versionId]);
+
+    useEffect(() => {
+        runningRef.current = task.running;
+    }, [task.running]);
+
+    useEffect(() => {
+        reconcileRef.current = reconcileLinsightFromServer;
+    }, [reconcileLinsightFromServer]);
 
 
     const connect = useCallback((id: string, msg: any) => {
@@ -67,6 +83,13 @@ export const useLinsightWebSocket = (versionId) => {
         websocket.onopen = () => {
             console.log("WebSocket connection established!");
             // websocket.send(JSON.stringify(msg));
+            // The run may have reached its end while we had no socket, and the
+            // terminal event is destructively popped server-side — nobody will
+            // resend it. Ask the DB what actually happened; a still-running
+            // session is left to the stream (see reconcileLinsightFromServer).
+            reconcileRef.current?.(id)?.catch((e) => {
+                console.error(`Failed to reconcile session ${id} on open:`, e);
+            });
         };
 
         websocket.onmessage = (event) => {
@@ -96,7 +119,9 @@ export const useLinsightWebSocket = (versionId) => {
                                 }
                                 parentsToUpdate.get(parentId).push({
                                     id: _task.id,
-                                    name: _task.task_data.display_target,
+                                    // F035 deepagents tasks carry the title at task_data.name;
+                                    // tolerate a flat name / legacy display_target too.
+                                    name: _task.name ?? _task.task_data?.name ?? _task.task_data?.display_target ?? '',
                                     status: _task.status,
                                     history: [],
                                 });
@@ -106,7 +131,7 @@ export const useLinsightWebSocket = (versionId) => {
                                 if (!exists) {
                                     updatedTasks.push({
                                         id: _task.id,
-                                        name: _task.task_data.display_target,
+                                        name: _task.name ?? _task.task_data?.name ?? _task.task_data?.display_target ?? '',
                                         status: _task.status,
                                         history: [],
                                         children: [],
@@ -144,11 +169,13 @@ export const useLinsightWebSocket = (versionId) => {
                         return { tasks: updatedTasks };
                     });
                     break;
-                case 'user_input':
+                case 'user_input': {
                     const { task_id, call_reason, params } = taskData.data;
                     updateLinsight(id, (prev) => {
+                        let matched = false;
                         const newTasks = prev.tasks.map(task => {
                             if (task.id === task_id) {
+                                matched = true;
                                 // 更新父任务
                                 return {
                                     ...task,
@@ -164,8 +191,9 @@ export const useLinsightWebSocket = (versionId) => {
                                 return {
                                     ...task,
                                     // status: taskData.event_type,
-                                    children: task.children.map(child => {
+                                    children: (task.children || []).map(child => {
                                         if (child.id === task_id) {
+                                            matched = true;
                                             // 更新子任务
                                             return {
                                                 ...child, // 关键修复：使用 child 而不是 task
@@ -183,10 +211,50 @@ export const useLinsightWebSocket = (versionId) => {
                                 };
                             }
                         });
-                        return { tasks: newTasks };
+                        if (matched) return { tasks: newTasks };
+                        // F035 Track H: session-level pseudo task (task_id == session_version_id),
+                        // e.g. pre-planning intent clarification — keep it at flow level
+                        return {
+                            sessionSteps: [...(prev.sessionSteps || []), { step_type: 'call_user_input', ...taskData.data }]
+                        };
                     });
                     break;
-                case 'user_input_completed':
+                }
+                case 'user_input_completed': {
+                    // F035 Track H: stamp the answered clarify entries so the active
+                    // ClarifyCard collapses into an intent-summary row (spec §2).
+                    const completedId = taskData.data.id ?? taskData.data.task_id;
+                    const answer = (taskData.data.history || [])
+                        .filter((h: any) => h?.role === 'user')
+                        .map((h: any) => h?.content)
+                        .join('\n');
+                    const markHistory = (history: any[]) => (history || []).map((h: any) =>
+                        h?.step_type === 'call_user_input' && !h.is_completed
+                            ? { ...h, is_completed: true, user_input: h.user_input || answer }
+                            : h
+                    );
+                    updateLinsight(id, (prev) => ({
+                        tasks: prev.tasks.map(task =>
+                            task.id === completedId
+                                ? { ...task, history: markHistory(task.history || []) }
+                                : {
+                                    ...task,
+                                    children: (task.children || []).map(child =>
+                                        child.id === completedId
+                                            ? { ...child, history: markHistory(child.history || []) }
+                                            : child
+                                    )
+                                }
+                        ),
+                        sessionSteps: (prev.sessionSteps || []).map((s: any) =>
+                            s?.step_type === 'call_user_input' && s.task_id === completedId && !s.is_completed
+                                ? { ...s, is_completed: true, user_input: s.user_input || answer }
+                                : s
+                        ),
+                    }));
+                }
+                // falls through: shared status update below
+                // eslint-disable-next-line no-fallthrough
                 case 'task_start':
                 case 'task_end':
                     updateLinsight(id, (prev) => {
@@ -224,20 +292,23 @@ export const useLinsightWebSocket = (versionId) => {
                     break;
                 case 'task_execute_step':
                     updateLinsight(id, (prev) => {
+                        let matched = false;
                         const newTasks = prev.tasks.map(task => {
                             if (task.id === taskData.data.task_id) {
+                                matched = true;
                                 return {
                                     ...task,
-                                    history: [...task.history, taskData.data]
+                                    history: [...(task.history || []), taskData.data]
                                 };
                             } else {
                                 return {
                                     ...task,
-                                    children: task.children.map(child => {
+                                    children: (task.children || []).map(child => {
                                         if (child.id === taskData.data.task_id) {
+                                            matched = true;
                                             return {
                                                 ...child,
-                                                history: [...child.history, taskData.data]
+                                                history: [...(child.history || []), taskData.data]
                                             };
                                         }
                                         return child;
@@ -246,8 +317,11 @@ export const useLinsightWebSocket = (versionId) => {
                             }
                         });
 
+                        if (matched) return { tasks: newTasks };
+                        // F035 Track H: session-level steps (task_id == session_version_id,
+                        // e.g. planning-stage tool calls) live at flow level
                         return {
-                            tasks: newTasks
+                            sessionSteps: [...(prev.sessionSteps || []), taskData.data]
                         };
                     });
                     break;
@@ -259,6 +333,27 @@ export const useLinsightWebSocket = (versionId) => {
                         status: SopStatus.completed
                     })
                     toggleNav(true)
+                    // Live only: the task answer is now a persisted category="task"
+                    // ChatMessage. Pull its real id (+ liked verdict) into the store so
+                    // like/dislike targets the right row the moment the result panel
+                    // appears — without this the panel showed while the message still
+                    // held its streaming placeholder id, so a like clicked before a
+                    // reload was lost.
+                    // The version-list already carries message_id (backend enrichment);
+                    // history hydration seeds the store from the same endpoint.
+                    {
+                        const sessionId = getLinsight(id)?.session_id;
+                        if (sessionId) {
+                            getLinsightSessionVersionList(sessionId, '')
+                                .then((list: any[]) => {
+                                    const v = (list || []).find((x) => String(x.id) === String(id));
+                                    if (v?.message_id != null) {
+                                        updateLinsight(id, { message_id: v.message_id, liked: v.liked });
+                                    }
+                                })
+                                .catch(() => { /* best-effort: a reload seeds it from the same endpoint */ });
+                        }
+                    }
                     break;
                 case 'task_terminated':
 
@@ -271,6 +366,13 @@ export const useLinsightWebSocket = (versionId) => {
                     if (id === activeVersionIdRef.current) {
                         updateLinsight(id, {
                             taskError: taskData.data.error,
+                            // 灵思LLM容错: structured classification drives the friendly
+                            // error card; absent on older backends (card falls back).
+                            taskErrorInfo: {
+                                error_code: taskData.data.error_code,
+                                error_type: taskData.data.error_type,
+                                detail: taskData.data.detail,
+                            },
                             status: SopStatus.Stoped
                         })
                         // showToast({ message: taskData.data.error, status: 'error' });
@@ -284,9 +386,24 @@ export const useLinsightWebSocket = (versionId) => {
                 delete connections[id];
                 if (maxRetryCountRef.current > 0) {
                     setTimeout(() => {
+                        // Guard against zombie reconnects: only relink if this
+                        // version is still the active one AND its task is still
+                        // running. A completed / parked / navigated-away session
+                        // must not be resurrected (the server closes it again,
+                        // which would just burn through the retry budget).
+                        if (activeVersionIdRef.current !== id || !runningRef.current) return;
                         connect(id, { type: 'relink' })
                         maxRetryCountRef.current--;
                     }, 1000);
+                } else if (runningRef.current) {
+                    // Retry budget spent while still running: there will be no
+                    // further `onopen` to reconcile on, so take the last chance
+                    // to adopt whatever state the server settled on. Without
+                    // this, a backend restart mid-run strands the panel
+                    // spinning until the user reloads.
+                    reconcileRef.current?.(id)?.catch((e) => {
+                        console.error(`Failed to reconcile session ${id} after retries:`, e);
+                    });
                 }
             } else {
             }
@@ -347,28 +464,35 @@ export const useLinsightWebSocket = (versionId) => {
             // @ts-ignore
             updateLinsight(versionId, (prev) => ({
                 ...prev,
-                tasks: prev.tasks.map(task => ({
-                    ...task,
-                    status: task_id === task.id ? "success" : task.status,
-                    history: task.history?.map(h => ({
-                        ...h,
-                        is_completed: true,
-                        user_input: h.user_input || user_input,
-                        files: h.files || files
-                    })),
-                    children: task.children
-                        ? task.children.map(child => ({
-                            ...child,
-                            status: task_id === child.id ? "success" : child.status,
-                            history: child.history?.map(h => ({
-                                ...h,
-                                is_completed: true,
-                                user_input: h.user_input || user_input,
-                                files: h.files || files
-                            })),
-                        }))
-                        : [],
-                })),
+                // F035 Track H: optimistic stamp for session-level clarify entries too
+                sessionSteps: (prev.sessionSteps || []).map((s: any) =>
+                    s?.step_type === 'call_user_input' && !s.is_completed
+                        ? { ...s, is_completed: true, user_input: s.user_input || user_input, files: s.files || files }
+                        : s
+                ),
+                // Only stamp the answered task's OPEN clarify entry — mirrors the
+                // WS `user_input_completed` handler. The previous version blanket-
+                // marked every history entry of every task is_completed AND forced
+                // the answered task to "success", but answering a clarify RESUMES
+                // execution (≠ completion) and must not touch sibling tasks / steps.
+                // Status is left to the WS stream.
+                tasks: prev.tasks.map(task => {
+                    const stampOpenClarify = (h: any) =>
+                        h?.step_type === 'call_user_input' && !h.is_completed
+                            ? { ...h, is_completed: true, user_input: h.user_input || user_input, files: h.files || files }
+                            : h;
+                    if (task.id === task_id) {
+                        return { ...task, history: task.history?.map(stampOpenClarify) };
+                    }
+                    return {
+                        ...task,
+                        children: (task.children || []).map(child =>
+                            child.id === task_id
+                                ? { ...child, history: child.history?.map(stampOpenClarify) }
+                                : child
+                        ),
+                    };
+                }),
             }));
         }
     }, [versionId]);

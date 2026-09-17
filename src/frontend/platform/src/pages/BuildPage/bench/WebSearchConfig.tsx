@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { Textarea } from "@/components/bs-ui/input";
 import { Label } from "@/components/bs-ui/label";
 import { useEffect, useState } from "react";
@@ -25,10 +26,10 @@ export const WebSearchConfig = ({
     // Store parameters for all tools separately
     const [toolsParams, setToolsParams] = useState<Record<string, any>>({
         bing: { api_key: '', base_url: '' },
-        bocha: { api_key: '' },
-        jina: { api_key: '' },
-        serp: { api_key: '', engine: '' },
-        tavily: { api_key: '' }
+        bocha: { api_key: '', base_url: '' },
+        jina: { api_key: '', base_url: '' },
+        serp: { api_key: '', engine: '', base_url: '' },
+        tavily: { api_key: '', base_url: '' }
     });
 
     // Initialize toolsParams with existing config

@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { TooltipAnchor } from '~/components/ui';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
@@ -12,7 +13,7 @@ export default function StopButton({ stop, setShowStopButton }) {
         <button
           type="button"
           className={cn(
-            'rounded-full bg-primary p-1 text-text-primary outline-offset-4 transition-all duration-200 disabled:cursor-not-allowed disabled:text-text-secondary disabled:opacity-10',
+            'btn-brand-primary rounded-full bg-primary p-1 text-text-primary outline-offset-4 transition-all duration-200 disabled:cursor-not-allowed disabled:text-text-secondary disabled:opacity-10',
           )}
           aria-label={localize('com_nav_stop_generating')}
           onClick={(e) => {

@@ -2,6 +2,15 @@ from typing import Any
 
 from loguru import logger
 
+from bisheng.citation.domain.services.citation_prompt_helper import (
+    annotate_rag_documents_with_citations,
+    cache_citation_registry_items_sync,
+    collect_rag_citation_registry_items,
+)
+from bisheng.workflow.common.citation_keys import (
+    WORKFLOW_CITATION_REGISTRY_ITEMS_KEY,
+    WORKFLOW_SOURCE_DOCUMENTS_KEY,
+)
 from bisheng.workflow.common.knowledge import RagUtils
 
 
@@ -14,17 +23,25 @@ class KnowledgeRetriever(RagUtils):
         try:
             self.user_questions = self.init_user_question()
             self.init_user_info()
-            self.init_multi_retriever()
+            if any(self.user_questions):
+                self.init_multi_retriever()
             ret = {}
             for index, question in enumerate(self.user_questions):
                 output_key = self._output_keys[index]
-                if question is None:
-                    question = ""
                 try:
-                    self.init_rerank_model()
-                    question_answer = self.retrieve_question(question)
+                    if question:
+                        self.init_rerank_model()
+                        question_answer = self.retrieve_question(question)
+                    else:
+                        question_answer = []
+                    question_answer = annotate_rag_documents_with_citations(question_answer)
+                    citation_items = collect_rag_citation_registry_items(question_answer)
+                    cache_citation_registry_items_sync(citation_items)
+                    self.graph_state.set_variable(self.id, WORKFLOW_SOURCE_DOCUMENTS_KEY, question_answer)
+                    self.graph_state.set_variable(self.id, WORKFLOW_CITATION_REGISTRY_ITEMS_KEY, citation_items)
                     question_answer = [{
                         "text": one.page_content,
+                        "citation_key": one.metadata.get('citation_key'),
                         "metadata": {
                             "chunk_index": one.metadata.get('chunk_index'),
                             "knowledge_id": one.metadata.get('knowledge_id'),

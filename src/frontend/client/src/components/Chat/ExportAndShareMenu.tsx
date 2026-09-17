@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { useState, useId, useRef } from 'react';
 import { useRecoilValue } from 'recoil';
 import * as Ariakit from '@ariakit/react';
@@ -6,7 +7,7 @@ import type * as t from '~/common';
 import ExportModal from '~/components/Nav/ExportConversation/ExportModal';
 import { ShareButton } from '~/components/Conversations/ConvoOptions';
 import { DropdownPopup, TooltipAnchor } from '~/components/ui';
-import { useMediaQuery, useLocalize } from '~/hooks';
+import { usePrefersMobileLayout, useLocalize } from '~/hooks';
 import store from '~/store';
 import { ShareOutlineIcon } from '~/components/icons';
 
@@ -23,7 +24,7 @@ export default function ExportAndShareMenu({
   const menuId = useId();
   const shareButtonRef = useRef<HTMLButtonElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
-  const isSmallScreen = useMediaQuery('(max-width: 768px)');
+  const isSmallScreen = usePrefersMobileLayout();
   const conversation = useRecoilValue(store.conversationByIndex(0));
 
   const exportable =

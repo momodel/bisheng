@@ -5,9 +5,22 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bisheng.common.dependencies.core_deps import get_db_session
 from bisheng.common.dependencies.user_deps import UserPayload
-from bisheng.knowledge.domain.repositories.implementations.knowledge_file_repository_impl import \
-    KnowledgeFileRepositoryImpl
+from bisheng.knowledge.domain.repositories.implementations.knowledge_document_repository_impl import (
+    KnowledgeDocumentRepositoryImpl,
+)
+from bisheng.knowledge.domain.repositories.implementations.knowledge_document_version_repository_impl import (
+    KnowledgeDocumentVersionRepositoryImpl,
+)
+from bisheng.knowledge.domain.repositories.implementations.knowledge_file_repository_impl import (
+    KnowledgeFileRepositoryImpl,
+)
 from bisheng.knowledge.domain.repositories.implementations.knowledge_repository_impl import KnowledgeRepositoryImpl
+from bisheng.knowledge.domain.repositories.interfaces.knowledge_document_repository import (
+    KnowledgeDocumentRepository,
+)
+from bisheng.knowledge.domain.repositories.interfaces.knowledge_document_version_repository import (
+    KnowledgeDocumentVersionRepository,
+)
 from bisheng.knowledge.domain.repositories.interfaces.knowledge_file_repository import KnowledgeFileRepository
 from bisheng.knowledge.domain.repositories.interfaces.knowledge_repository import KnowledgeRepository
 from bisheng.knowledge.domain.services.knowledge_audit_telemetry_service import KnowledgeAuditTelemetryService
@@ -19,8 +32,9 @@ from bisheng.message.api.dependencies import get_message_service as _get_message
 if TYPE_CHECKING:
     from bisheng.knowledge.domain.services.knowledge_file_service import KnowledgeFileService
     from bisheng.knowledge.domain.services.knowledge_service import KnowledgeService
-    from bisheng.knowledge.domain.services.knowledge_space_service import KnowledgeSpaceService
     from bisheng.knowledge.domain.services.knowledge_space_chat_service import KnowledgeSpaceChatService
+    from bisheng.knowledge.domain.services.knowledge_space_service import KnowledgeSpaceService
+    from bisheng.knowledge.domain.services.knowledge_version_service import KnowledgeVersionService
 
 
 async def get_knowledge_repository(
@@ -36,6 +50,18 @@ async def get_knowledge_file_repository(
     """DapatkanKnowledgeFileRepositoryInstance Dependencies"""
 
     return KnowledgeFileRepositoryImpl(session)
+
+
+async def get_knowledge_document_repository(
+        session: AsyncSession = Depends(get_db_session),
+) -> KnowledgeDocumentRepository:
+    return KnowledgeDocumentRepositoryImpl(session)
+
+
+async def get_knowledge_document_version_repository(
+        session: AsyncSession = Depends(get_db_session),
+) -> KnowledgeDocumentVersionRepository:
+    return KnowledgeDocumentVersionRepositoryImpl(session)
 
 
 async def get_knowledge_metadata_service(
@@ -84,19 +110,81 @@ async def get_knowledge_space_service(
         request: Request,
         session: AsyncSession = Depends(get_db_session),
         login_user: UserPayload = Depends(UserPayload.get_login_user),
+        version_repo: KnowledgeDocumentVersionRepository = Depends(get_knowledge_document_version_repository),
+        doc_repo: KnowledgeDocumentRepository = Depends(get_knowledge_document_repository),
 ) -> 'KnowledgeSpaceService':
     """Get KnowledgeSpaceService instance, bound to the current request and login user"""
     from bisheng.knowledge.domain.services.knowledge_space_service import KnowledgeSpaceService as _SvcClass
+    from bisheng.permission.application.access import get_f048_runtime
+    from bisheng.permission.application.initial_grant import InitialGrantApplication
+    from bisheng.permission.application.prospective_grant import ProspectiveGrantApplication
+    from bisheng.tenant.domain.services.f048_permission_subject import TenantPermissionSubjectDirectory
+
     message_service = await _get_message_service(session)
-    service = _SvcClass(request=request, login_user=login_user)
+    runtime = await get_f048_runtime()
+    subject_directory = TenantPermissionSubjectDirectory()
+    service = _SvcClass(
+        request=request,
+        login_user=login_user,
+        initial_grant_application=InitialGrantApplication(
+            runtime=runtime,
+            subjects=subject_directory,
+        ),
+        prospective_grant_application=ProspectiveGrantApplication(
+            runtime=runtime,
+            subjects=subject_directory,
+        ),
+    )
     service.message_service = message_service
+    service.version_repo = version_repo
+    service.doc_repo = doc_repo
     return service
 
 
-def get_knowledge_space_chat_service(
+async def get_knowledge_space_chat_service(
+        request: Request,
+        session: AsyncSession = Depends(get_db_session),
+        login_user: UserPayload = Depends(UserPayload.get_login_user),
+        version_repo: KnowledgeDocumentVersionRepository = Depends(get_knowledge_document_version_repository),
+) -> 'KnowledgeSpaceChatService':
+    """Get KnowledgeSpaceChatService instance, bound to the current request and login user."""
+    from bisheng.knowledge.domain.services.knowledge_space_chat_service import KnowledgeSpaceChatService as _SvcClass
+    service = _SvcClass(request=request, login_user=login_user)
+    service.version_repo = version_repo
+    return service
+
+
+async def get_knowledge_file_visibility_service(
         request: Request,
         login_user: UserPayload = Depends(UserPayload.get_login_user),
-) -> 'KnowledgeSpaceChatService':
-    """Get KnowledgeSpaceChatService instance, bound to the current request and login user"""
-    from bisheng.knowledge.domain.services.knowledge_space_chat_service import KnowledgeSpaceChatService as _SvcClass
-    return _SvcClass(request=request, login_user=login_user)
+        version_repo: KnowledgeDocumentVersionRepository = Depends(get_knowledge_document_version_repository),
+) -> 'KnowledgeFileVisibilityService':
+    """Get KnowledgeFileVisibilityService instance (F029).
+
+    Bound to the current request and login user; shared by chat_folder,
+    queryChunksFromDB and CitationResolveService for view_file filtering.
+    """
+    from bisheng.knowledge.domain.services.knowledge_file_visibility_service import (
+        KnowledgeFileVisibilityService as _SvcClass,
+    )
+    service = _SvcClass(request=request, login_user=login_user)
+    service.version_repo = version_repo
+    return service
+
+
+async def get_knowledge_version_service(
+        request: Request,
+        login_user: UserPayload = Depends(UserPayload.get_login_user),
+        doc_repo: KnowledgeDocumentRepository = Depends(get_knowledge_document_repository),
+        version_repo: KnowledgeDocumentVersionRepository = Depends(get_knowledge_document_version_repository),
+        knowledge_file_repo: KnowledgeFileRepository = Depends(get_knowledge_file_repository),
+) -> 'KnowledgeVersionService':
+    """Get KnowledgeVersionService instance, bound to the current request and login user."""
+    from bisheng.knowledge.domain.services.knowledge_version_service import KnowledgeVersionService
+    return KnowledgeVersionService(
+        request=request,
+        login_user=login_user,
+        doc_repo=doc_repo,
+        version_repo=version_repo,
+        knowledge_file_repo=knowledge_file_repo,
+    )

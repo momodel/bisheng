@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import React, { forwardRef } from "react";
 import CsvIcon from "./csv.svg?react";
 import DocIcon from "./doc.svg?react";
@@ -14,14 +15,17 @@ export type FileType =
     | 'pdf'
     | 'doc'
     | 'docx'
+    | 'wps'
     | 'ppt'
     | 'pptx'
+    | 'dps'
     | 'md' | 'html' | 'txt' | 'json'
     | 'jpg'
     | 'jpeg'
     | 'png'
     | 'bmp'
     | 'csv'
+    | 'et'
     | 'xls'
     | 'xlsx';
 
@@ -32,8 +36,10 @@ const iconComponents: Record<FileType, React.ComponentType<any>> = {
     json: TxtIcon,
     doc: DocIcon,
     docx: DocxIcon,
+    wps: DocxIcon,
     ppt: PptIcon,
     pptx: PptxIcon,
+    dps: PptxIcon,
     md: TxtIcon,
     html: TxtIcon,
     jpg: ImageIcon,
@@ -41,6 +47,7 @@ const iconComponents: Record<FileType, React.ComponentType<any>> = {
     png: ImageIcon,
     bmp: ImageIcon,
     csv: CsvIcon,
+    et: XlsxIcon,
     xls: XlsIcon,
     xlsx: XlsxIcon
 };

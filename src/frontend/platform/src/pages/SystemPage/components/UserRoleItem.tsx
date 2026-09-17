@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { DelIcon } from "@/components/bs-icons";
 import { Button } from "@/components/bs-ui/button";
 import MultiSelect from "@/components/bs-ui/select/multi";
@@ -16,7 +17,7 @@ export default function UserRoleItem({ showDel, groupId, selectedRoles, onDelete
     const [userGroupSelected, setUserGroupSelected] = useState(groupId ? [groupId] : [])
     const loadGroups = () => {
         getUserGroupsApi().then((res: any) => {
-            const groups = res.records.map((ug) => {
+            const groups = res.map((ug) => {
                 return {
                     label: ug.group_name,
                     value: ug.id.toString()

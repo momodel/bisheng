@@ -1,46 +1,33 @@
-import asyncio
 import json
 import os
 import re
-import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiofiles
 import requests
-from langchain.schema.document import Document
-from langchain.text_splitter import CharacterTextSplitter
-from langchain_community.document_loaders import (
-    BSHTMLLoader,
-    PyPDFLoader,
-    TextLoader,
-    UnstructuredPowerPointLoader,
-    UnstructuredWordDocumentLoader,
-)
+from langchain_classic.schema.document import Document
+from langchain_classic.text_splitter import CharacterTextSplitter
 from loguru import logger
 from sqlalchemy import func, or_
 from sqlmodel import select
 
-from bisheng.api.services.etl4lm_loader import Etl4lmLoader
-from bisheng.api.services.patch_130 import (
-    convert_file_to_md,
-    combine_multiple_md_files_to_raw_texts,
-)
-from bisheng.api.v1.schemas import ExcelRule
-from bisheng.common.constants.enums.telemetry import BaseTelemetryTypeEnum, ApplicationTypeEnum
+from bisheng.common.constants.enums.telemetry import ApplicationTypeEnum, BaseTelemetryTypeEnum
 from bisheng.common.constants.vectorstore_metadata import KNOWLEDGE_RAG_METADATA_SCHEMA, QA_KNOWLELDGE_METADATA_SCHEMA
 from bisheng.common.errcode import BaseErrorCode
-from bisheng.common.errcode.knowledge import KnowledgeSimilarError, KnowledgeFileDeleteError, KnowledgeFileEmptyError, \
-    KnowledgeFileChunkMaxError, KnowledgeLLMError, KnowledgeFileDamagedError, KnowledgeFileNotSupportedError, \
-    KnowledgeEtl4lmTimeoutError, KnowledgeFileFailedError, KnowledgeExcelChunkMaxError, KnowledgeRecommendQuestionError
+from bisheng.common.errcode.knowledge import (
+    KnowledgeEtl4lmTimeoutError,
+    KnowledgeFileDeleteError,
+    KnowledgeFileFailedError,
+    KnowledgeRecommendQuestionError,
+    KnowledgeSimilarError,
+)
 from bisheng.common.schemas.telemetry.event_data_schema import FileParseEventData
 from bisheng.common.services import telemetry_service
 from bisheng.common.services.config_service import settings
 from bisheng.core.ai import FakeEmbeddings
-from bisheng.core.cache.utils import file_download
 from bisheng.core.database import get_sync_db_session
 from bisheng.core.logger import trace_id_var
-from bisheng.core.storage.minio.minio_manager import get_minio_storage_sync, get_minio_storage
+from bisheng.core.storage.minio.minio_manager import get_minio_storage, get_minio_storage_sync
 from bisheng.knowledge.domain.knowledge_rag import KnowledgeRag
 from bisheng.knowledge.domain.models.knowledge import Knowledge, KnowledgeDao, KnowledgeTypeEnum
 from bisheng.knowledge.domain.models.knowledge_file import (
@@ -53,29 +40,13 @@ from bisheng.knowledge.domain.models.knowledge_file import (
     QAKnowledgeUpsert,
     QAStatus,
 )
-from bisheng.knowledge.domain.schemas.knowledge_rag_schema import Metadata, QAKnowledgeMetadata
+from bisheng.knowledge.domain.schemas.knowledge_rag_schema import QAKnowledgeMetadata
+from bisheng.knowledge.domain.services.knowledge_space_auto_tag_service import KnowledgeSpaceAutoTagService
 from bisheng.knowledge.domain.services.knowledge_utils import KnowledgeUtils
-from bisheng.knowledge.domain.utils import is_pdf_damaged
 from bisheng.knowledge.rag.knowledge_file_pipeline import KnowledgeFilePipeline
-from bisheng.knowledge.rag.pipeline.loader.utils.libreoffice_converter import (
-    convert_doc_to_docx,
-    convert_ppt_to_pdf, convert_ppt_to_pptx,
-)
 from bisheng.llm.domain.services import LLMService
-from bisheng.user.domain.models.user import UserDao
-from bisheng.utils import util
-from bisheng.utils.exceptions import EtlException, FileParseException
-from bisheng_langchain.rag.extract_info import extract_title, async_extract_title
-from bisheng_langchain.text_splitter import ElemCharacterTextSplitter
-
-filetype_load_map = {
-    "txt": TextLoader,
-    "pdf": PyPDFLoader,
-    "html": BSHTMLLoader,
-    "md": TextLoader,
-    "docx": UnstructuredWordDocumentLoader,
-    "pptx": UnstructuredPowerPointLoader,
-}
+from bisheng.sensitive_word.domain.services.exceptions import ContentSafetyViolation
+from bisheng.utils.exceptions import EtlException
 
 
 def put_images_to_minio(local_image_dir, knowledge_id, doc_id):
@@ -89,9 +60,7 @@ def put_images_to_minio(local_image_dir, knowledge_id, doc_id):
         local_file_name = f"{local_image_dir}/{file_name}"
         object_name = f"{KnowledgeUtils.get_knowledge_file_image_dir(doc_id, knowledge_id)}/{file_name}"
         with open(local_file_name, "rb") as file_obj:
-            minio_client.put_object_sync(
-                object_name=object_name, file=file_obj.read(), bucket_name=minio_client.bucket
-            )
+            minio_client.put_object_sync(object_name=object_name, file=file_obj.read(), bucket_name=minio_client.bucket)
 
 
 async def async_images_to_minio(local_image_dir, knowledge_id, doc_id):
@@ -111,10 +80,11 @@ async def async_images_to_minio(local_image_dir, knowledge_id, doc_id):
 
 
 def process_file_task(
-        knowledge: Knowledge,
-        db_files: List[KnowledgeFile],
-        preview_cache_keys: List[str] = None,
-        callback_url: str = None,
+    knowledge: Knowledge,
+    db_files: list[KnowledgeFile],
+    preview_cache_keys: list[str] = None,
+    callback_url: str = None,
+    enable_auto_tags: bool = False,
 ):
     """Working with Knowledge Files Tasks"""
     try:
@@ -123,6 +93,7 @@ def process_file_task(
             db_files,
             callback=callback_url,
             preview_cache_keys=preview_cache_keys,
+            enable_auto_tags=enable_auto_tags,
         )
     except Exception as e:
         logger.exception("process_file_task error")
@@ -137,14 +108,15 @@ def process_file_task(
         raise e
 
 
-def delete_vector_files(file_ids: List[int], knowledge: Knowledge) -> bool:
-    """ Delete vector data andesDATA """
+def delete_vector_files(file_ids: list[int], knowledge: Knowledge) -> bool:
+    """Delete vector data andesDATA"""
     if not file_ids:
         return True
     logger.info(f"delete_files file_ids={file_ids} knowledge_id={knowledge.id}")
     logger.info("start init Milvus")
-    vector_client = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(0, knowledge=knowledge,
-                                                                        embeddings=FakeEmbeddings())
+    vector_client = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(
+        0, knowledge=knowledge, embeddings=FakeEmbeddings()
+    )
     logger.info("start init ES")
     es_client = KnowledgeRag.init_knowledge_es_vectorstore_sync(knowledge=knowledge)
     # Automatically close purchase order aftercollectionIf it does not exist, it will not
@@ -178,16 +150,18 @@ def delete_minio_files(file: KnowledgeFile):
     # Delete ConvertedpdfDoc.
     minio_client.remove_object_sync(bucket_name=minio_client.bucket, object_name=f"{file.id}")
 
-    # Delete preview file
-    preview_object_name = KnowledgeUtils.get_knowledge_preview_file_object_name(
-        file.id, file.file_name
+    # Delete preview file. Prefer the persisted object name because generated
+    # previews such as media transcripts and web pages are not always derivable
+    # from the user-facing filename.
+    preview_object_name = KnowledgeUtils.resolve_preview_object_name(
+        file.id, file.file_name, file.preview_file_object_name
     )
     if preview_object_name:
         minio_client.remove_object_sync(bucket_name=minio_client.bucket, object_name=preview_object_name)
     return True
 
 
-def delete_knowledge_file_vectors(file_ids: List[int], clear_minio: bool = True):
+def delete_knowledge_file_vectors(file_ids: list[int], clear_minio: bool = True):
     """Delete Knowledge File Information"""
     knowledge_files = KnowledgeFileDao.select_list(file_ids=file_ids)
 
@@ -204,72 +178,38 @@ def delete_knowledge_file_vectors(file_ids: List[int], clear_minio: bool = True)
     return True
 
 
-def decide_knowledge_llm(invoke_user_id: int) -> Any:
-    """Get a summary of the knowledge basechunkright of privacy llmObjects"""
-    # DapatkanllmConfigure
-    knowledge_llm = LLMService.get_knowledge_llm()
-    if not knowledge_llm.extract_title_model_id:
-        # No related configurations
-        return None
-
-    # DapatkanllmObjects
-    return LLMService.get_bisheng_llm_sync(
-        model_id=knowledge_llm.extract_title_model_id,
-
-        app_id=ApplicationTypeEnum.KNOWLEDGE_BASE.value,
-        app_name=ApplicationTypeEnum.KNOWLEDGE_BASE.value,
-        app_type=ApplicationTypeEnum.KNOWLEDGE_BASE,
-        user_id=invoke_user_id)
-
-
-async def async_decide_knowledge_llm(invoke_user_id: int) -> Any:
-    """Get a summary of the knowledge basechunkright of privacy llmObjects"""
-    # DapatkanllmConfigure
-    knowledge_llm = await LLMService.aget_knowledge_llm()
-    if not knowledge_llm.extract_title_model_id:
-        # No related configurations
-        return None
-
-    # DapatkanllmObjects
-    return await LLMService.get_bisheng_llm(
-        model_id=knowledge_llm.extract_title_model_id,
-
-        app_id=ApplicationTypeEnum.KNOWLEDGE_BASE.value,
-        app_name=ApplicationTypeEnum.KNOWLEDGE_BASE.value,
-        app_type=ApplicationTypeEnum.KNOWLEDGE_BASE,
-        user_id=invoke_user_id)
-
-
 def addEmbedding(
-        knowledge_id: int,
-        knowledge_files: List[KnowledgeFile],
-        callback: str = None,
-        preview_cache_keys: List[str] = None,
+    knowledge_id: int,
+    knowledge_files: list[KnowledgeFile],
+    callback: str = None,
+    preview_cache_keys: list[str] = None,
+    enable_auto_tags: bool = False,
 ):
     """Adding Files to Vector SumsesCunene"""
 
     knowledge_info = KnowledgeDao.query_by_id(knowledge_id)
     logger.info("start init Milvus")
-    vector_client = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(knowledge_files[0].updater_id,
-                                                                        knowledge=knowledge_info,
-                                                                        metadata_schemas=KNOWLEDGE_RAG_METADATA_SCHEMA)
+    vector_client = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(
+        knowledge_files[0].updater_id, knowledge=knowledge_info, metadata_schemas=KNOWLEDGE_RAG_METADATA_SCHEMA
+    )
+    vector_client = KnowledgeUtils.ensure_milvus_schema_ready(
+        invoke_user_id=knowledge_files[0].updater_id,
+        knowledge=knowledge_info,
+        vector_client=vector_client,
+    )
     logger.info("start init ES")
-    es_client = KnowledgeRag.init_knowledge_es_vectorstore_sync(knowledge=knowledge_info,
-                                                                metadata_schemas=KNOWLEDGE_RAG_METADATA_SCHEMA)
+    es_client = KnowledgeRag.init_knowledge_es_vectorstore_sync(
+        knowledge=knowledge_info, metadata_schemas=KNOWLEDGE_RAG_METADATA_SCHEMA
+    )
     for index, db_file in enumerate(knowledge_files):
         # Try to get chunks of a file from the cache
         db_file.parse_type = ParseType.UN_ETL4LM.value
         preview_cache_key = None
         if preview_cache_keys:
-            preview_cache_key = (
-                preview_cache_keys[index] if index < len(preview_cache_keys) else None
-            )
-        status = 'failed'
+            preview_cache_key = preview_cache_keys[index] if index < len(preview_cache_keys) else None
+        status = "failed"
         try:
-
-            logger.info(
-                f"process_file_begin file_id={db_file.id} file_name={db_file.file_name}"
-            )
+            logger.info(f"process_file_begin file_id={db_file.id} file_name={db_file.file_name}")
             knowledge_file_pipeline = KnowledgeFilePipeline(
                 invoke_user_id=db_file.user_id,
                 db_file=db_file,
@@ -277,44 +217,107 @@ def addEmbedding(
                 need_thumbnail=knowledge_info.type == KnowledgeTypeEnum.SPACE.value,
                 vector_store=[vector_client, es_client],
             )
-            _ = knowledge_file_pipeline.run()
+            pipeline_result = knowledge_file_pipeline.run()
             db_file.status = KnowledgeFileStatus.SUCCESS.value
-            status = 'success'
+
+            # TODO[plan-3-async]: trigger SimHash similar-scan after successful parse.
+            # addEmbedding runs in a sync Celery worker; async scan is deferred to a
+            # dedicated async task or can be triggered via the Plan 3 Task 6 endpoints.
+            # Sync similar-scan: avoids event-loop conflicts when the Celery worker
+            # thread already participates in an asyncio context.
+            # Reads db_file.simhash from memory (freshly written by SimHashTransformer,
+            # not yet committed) and stages db_file.similar_status for the upstream
+            # KnowledgeFileDao.update(db_file) call to persist.
+            try:
+                from sqlmodel import col, select
+
+                from bisheng.common.utils.simhash_utils import similarity as _simhash_similarity
+                from bisheng.core.database import get_sync_db_session
+                from bisheng.knowledge.domain.models.knowledge_document import KnowledgeDocument
+                from bisheng.knowledge.domain.models.knowledge_document_version import (
+                    KnowledgeDocumentVersion,
+                )
+
+                knowledge_conf = settings.get_knowledge()
+                vmc = getattr(knowledge_conf, "version_management", None)
+                threshold = vmc.simhash_similarity_threshold if vmc else 0.85
+
+                if db_file.simhash:
+                    with get_sync_db_session() as session:
+                        primary_kf_ids = session.exec(
+                            select(KnowledgeDocumentVersion.knowledge_file_id)
+                            .join(
+                                KnowledgeDocument,
+                                KnowledgeDocumentVersion.document_id == KnowledgeDocument.id,
+                            )
+                            .where(
+                                KnowledgeDocument.knowledge_id == db_file.knowledge_id,
+                                KnowledgeDocumentVersion.is_primary == True,  # noqa: E712
+                                KnowledgeDocumentVersion.knowledge_file_id != db_file.id,
+                            )
+                        ).all()
+                        above_count = 0
+                        if primary_kf_ids:
+                            candidates = session.exec(
+                                select(KnowledgeFile).where(col(KnowledgeFile.id).in_(primary_kf_ids))
+                            ).all()
+                            for cand in candidates:
+                                if cand.simhash and _simhash_similarity(db_file.simhash, cand.simhash) >= threshold:
+                                    above_count += 1
+                    logger.info(
+                        f"similar_scan_sync file_id={db_file.id} "
+                        f"simhash={db_file.simhash} "
+                        f"candidates={len(primary_kf_ids)} above={above_count} "
+                        f"threshold={threshold}"
+                    )
+                    if above_count > 0:
+                        db_file.similar_status = 1
+                else:
+                    logger.warning(f"similar_scan_sync file_id={db_file.id} skipped: no simhash in memory")
+            except Exception:
+                logger.opt(exception=True).warning("similar scan (sync) failed")
+
+            if enable_auto_tags:
+                KnowledgeSpaceAutoTagService.apply_after_upload_parse(
+                    knowledge=knowledge_info,
+                    db_file=db_file,
+                    documents=pipeline_result.documents,
+                )
+            status = "success"
         except EtlException as e:
-            logger.exception(
-                f"process_file_fail file_id={db_file.id} file_name={db_file.file_name}"
-            )
+            logger.exception(f"process_file_fail file_id={db_file.id} file_name={db_file.file_name}")
             db_file.parse_type = ParseType.ETL4LM.value
             db_file.status = KnowledgeFileStatus.FAILED.value
             if str(e).find("etl4lm server timeout") != -1:
                 db_file.remark = KnowledgeEtl4lmTimeoutError(exception=e).to_json_str()
             else:
                 db_file.remark = KnowledgeFileFailedError(exception=e).to_json_str()
-            status = 'parse_failed'
+            status = "parse_failed"
+        except ContentSafetyViolation as e:
+            logger.warning(f"process_file_sensitive_violation file_id={db_file.id} file_name={db_file.file_name}")
+            db_file.status = KnowledgeFileStatus.VIOLATION.value
+            db_file.remark = json.dumps(e.to_remark(), ensure_ascii=False)
+            status = "failed"
         except BaseErrorCode as e:
             db_file.status = KnowledgeFileStatus.FAILED.value
             db_file.remark = e.to_json_str()
-            status = 'failed'
+            status = "failed"
         except Exception as e:
-            logger.exception(
-                f"process_file_fail file_id={db_file.id} file_name={db_file.file_name}"
-            )
+            logger.exception(f"process_file_fail file_id={db_file.id} file_name={db_file.file_name}")
             db_file.status = KnowledgeFileStatus.FAILED.value
             db_file.remark = KnowledgeFileFailedError(exception=e).to_json_str()
-            status = 'failed'
+            status = "failed"
         finally:
-            logger.info(
-                f"process_file_end file_id={db_file.id} file_name={db_file.file_name}"
-            )
+            logger.info(f"process_file_end file_id={db_file.id} file_name={db_file.file_name}")
             KnowledgeFileDao.update(db_file)
-            telemetry_service.log_event_sync(user_id=db_file.user_id,
-                                             event_type=BaseTelemetryTypeEnum.FILE_PARSE,
-                                             trace_id=trace_id_var.get(),
-                                             event_data=FileParseEventData(
-                                                 parse_type=db_file.parse_type,
-                                                 status=status,
-                                                 app_type=ApplicationTypeEnum.KNOWLEDGE_BASE
-                                             ))
+            telemetry_service.log_event_sync(
+                user_id=db_file.user_id,
+                event_type=BaseTelemetryTypeEnum.FILE_PARSE,
+                trace_id=trace_id_var.get(),
+                event_data=FileParseEventData(
+                    parse_type=db_file.parse_type, status=status, app_type=ApplicationTypeEnum.KNOWLEDGE_BASE
+                ),
+            )
 
             if callback:
                 inp = {
@@ -326,167 +329,12 @@ def addEmbedding(
                 requests.post(url=callback, json=inp, timeout=3)
 
 
-def add_file_embedding(
-        vector_client,
-        es_client,
-        minio_client,
-        db_file: KnowledgeFile,
-        separator: List[str],
-        separator_rule: List[str],
-        chunk_size: int,
-        chunk_overlap: int,
-        extra_meta: Dict = None,
-        preview_cache_key: str = None,
-        knowledge_id: int = None,
-        retain_images: int = 1,
-        enable_formula: int = 1,
-        force_ocr: int = 0,
-        filter_page_header_footer: int = 0,
-):
-    # download original file
-    logger.info(
-        f"start download original file={db_file.id} file_name={db_file.file_name}"
-    )
-
-    file_url = minio_client.get_share_link_sync(db_file.object_name, clear_host=False)
-    filepath, _ = file_download(file_url)
-    file_ext = Path(db_file.file_name).suffix.lower()
-
-    # Convert split_rule string to dict if needed
-    excel_rule = ExcelRule()
-    if db_file.split_rule and isinstance(db_file.split_rule, str):
-        split_rule = json.loads(db_file.split_rule)
-        if "excel_rule" in split_rule:
-            excel_rule = ExcelRule(**split_rule["excel_rule"])
-    # # extract text from file
-    try:
-        texts, metadatas, parse_type, partitions = read_chunk_text(
-            db_file.user_id,
-            filepath,
-            db_file.file_name,
-            separator,
-            separator_rule,
-            chunk_size,
-            chunk_overlap,
-            knowledge_id=knowledge_id,
-            retain_images=retain_images,
-            enable_formula=enable_formula,
-            force_ocr=force_ocr,
-            filter_page_header_footer=filter_page_header_footer,
-            excel_rule=excel_rule,
-        )
-    except EtlException as e:
-        db_file.parse_type = ParseType.ETL4LM.value
-        raise FileParseException(str(e)) from e
-    except BaseErrorCode as e:
-        raise e
-    except Exception as e:
-        raise FileParseException(str(e)) from e
-
-    if len(texts) == 0:
-        raise KnowledgeFileEmptyError()
-    # If there is data in the cache, the data in the cache is used to go to the warehouse because the user edited it in the interface.
-    if preview_cache_key:
-        all_chunk_info = KnowledgeUtils.get_preview_cache(preview_cache_key)
-        if all_chunk_info:
-            logger.info(
-                f"get_preview_cache file={db_file.id} file_name={db_file.file_name}"
-            )
-            texts, metadatas = [], []
-            for key, val in all_chunk_info.items():
-                texts.append(val["text"])
-                metadatas.append(Metadata(**val["metadata"]))
-    for index, one in enumerate(texts):
-        if len(one) > 10000:
-            if file_ext in (".xlsx", ".xls", ".csv"):
-                raise KnowledgeExcelChunkMaxError()
-            raise KnowledgeFileChunkMaxError()
-        # On Inbound Stitching file names and document summaries
-        texts[index] = KnowledgeUtils.aggregate_chunk_metadata(one, metadatas[index].model_dump())
-
-    db_file.parse_type = parse_type
-    # StorageocrIdentifiedpartitions<g id="Bold">Result</g>
-    if partitions:
-        partition_data = json.dumps(partitions, ensure_ascii=False).encode("utf-8")
-        db_file.bbox_object_name = KnowledgeUtils.get_knowledge_bbox_file_object_name(
-            db_file.id
-        )
-        minio_client.put_object_sync(
-            bucket_name=minio_client.bucket,
-            object_name=db_file.bbox_object_name,
-            file=partition_data, content_type="application/json",
-        )
-
-    logger.info(
-        f"chunk_split file={db_file.id} file_name={db_file.file_name} size={len(texts)}"
-    )
-    uploader = UserDao.get_user(user_id=db_file.user_id).user_name
-    if db_file.updater_id:
-        updater = UserDao.get_user(user_id=db_file.updater_id).user_name
-    else:
-        updater = uploader
-    for metadata in metadatas:
-        metadata.document_id = db_file.id
-        metadata.knowledge_id = db_file.knowledge_id
-        if extra_meta:
-            metadata.user_metadata = metadata.user_metadata.update(extra_meta)
-        metadata.upload_time = int(db_file.create_time.timestamp())
-        metadata.update_time = int(db_file.update_time.timestamp())
-        metadata.uploader = uploader
-        metadata.updater = updater
-
-    metadatas = [metadata.model_dump() for metadata in metadatas]
-    logger.info(f"add_vectordb file={db_file.id} file_name={db_file.file_name}")
-    # Depositmilvus
-    vector_client.add_texts(texts=texts, metadatas=metadatas)
-
-    logger.info(f"add_es file={db_file.id} file_name={db_file.file_name}")
-    # Deposites
-    es_client.add_texts(texts=texts, metadatas=metadatas)
-
-    logger.info(f"add_complete file={db_file.id} file_name={db_file.file_name}")
-
-    if preview_cache_key:
-        KnowledgeUtils.delete_preview_cache(preview_cache_key)
-
-    if file_ext in (".doc", ".ppt", ".pptx"):
-        tmp_preview_file = KnowledgeUtils.get_tmp_preview_file_object_name(filepath)
-
-        preview_object_name = KnowledgeUtils.get_knowledge_preview_file_object_name(
-            db_file.id, db_file.file_name
-        )
-        logger.info(
-            f"upload_preview_file_to_minio file={db_file.id} tmp_object_name={tmp_preview_file}, preview_object_name={preview_object_name}"
-        )
-        if minio_client.object_exists_sync(minio_client.tmp_bucket, tmp_preview_file):
-            minio_client.copy_object_sync(
-                source_object=tmp_preview_file,
-                dest_object=preview_object_name,
-                source_bucket=minio_client.tmp_bucket,
-                dest_bucket=minio_client.bucket,
-            )
-        logger.info(
-            f"upload_preview_file_over file={db_file.id} tmp_object_name={tmp_preview_file}, preview_object_name={preview_object_name}"
-        )
-    elif file_ext == ".docx":
-        # special logic for docx replace original file
-        filepath_dir = os.path.dirname(filepath)
-        docx_fixed_path = os.path.join(filepath_dir, "tmp")
-        docx_fixed_path = os.path.join(docx_fixed_path, os.path.basename(filepath))
-        if os.path.exists(docx_fixed_path):
-            # replace original docx file
-            minio_client.put_object_sync(
-                bucket_name=minio_client.bucket,
-                object_name=db_file.object_name,
-                file=docx_fixed_path)
-
-
 def add_text_into_vector(
-        vector_client,
-        es_client,
-        db_file: KnowledgeFile,
-        texts: List[str],
-        metadatas: List[dict],
+    vector_client,
+    es_client,
+    db_file: KnowledgeFile,
+    texts: list[str],
+    metadatas: list[dict],
 ):
     logger.info(f"add_vectordb file={db_file.id} file_name={db_file.file_name}")
     # Depositmilvus
@@ -497,7 +345,7 @@ def add_text_into_vector(
     es_client.add_texts(texts=texts, metadatas=metadatas)
 
 
-def parse_partitions(partitions: List[Any]) -> Dict:
+def parse_partitions(partitions: list[Any]) -> dict:
     """Resolve BuildbboxCorrespondence with text"""
     if not partitions:
         return {}
@@ -510,50 +358,34 @@ def parse_partitions(partitions: List[Any]) -> Dict:
         for index, bbox in enumerate(bboxes):
             key = f"{pages[index]}-" + "-".join([str(int(one)) for one in bbox])
             if index == len(bboxes) - 1:
-                val = text[indexes[index][0]:]
+                val = text[indexes[index][0] :]
             else:
-                val = text[indexes[index][0]:indexes[index][1]]
+                val = text[indexes[index][0] : indexes[index][1]]
             res[key] = {"text": val, "type": part["type"], "part_id": part_index}
     return res
 
 
 def upload_preview_file_to_minio(original_file_path: str, preview_file_path: str):
-    if (
-            os.path.basename(original_file_path).split(".")[0]
-            != os.path.basename(preview_file_path).split(".")[0]
-    ):
-        logger.error(
-            f"Original and preview file paths do not match: {original_file_path} vs {preview_file_path}"
-        )
+    if os.path.basename(original_file_path).split(".")[0] != os.path.basename(preview_file_path).split(".")[0]:
+        logger.error(f"Original and preview file paths do not match: {original_file_path} vs {preview_file_path}")
 
     minio_client = get_minio_storage_sync()
     object_name = KnowledgeUtils.get_tmp_preview_file_object_name(original_file_path)
     with open(preview_file_path, "rb") as file_obj:
         # Upload preview file tominio
-        minio_client.put_object_tmp_sync(
-            object_name=object_name, file=file_obj.read()
-        )
+        minio_client.put_object_tmp_sync(object_name=object_name, file=file_obj.read())
     return object_name
 
 
-async def async_upload_preview_file_to_minio(
-        original_file_path: str, preview_file_path: str
-):
-    if (
-            os.path.basename(original_file_path).split(".")[0]
-            != os.path.basename(preview_file_path).split(".")[0]
-    ):
-        logger.error(
-            f"Original and preview file paths do not match: {original_file_path} vs {preview_file_path}"
-        )
+async def async_upload_preview_file_to_minio(original_file_path: str, preview_file_path: str):
+    if os.path.basename(original_file_path).split(".")[0] != os.path.basename(preview_file_path).split(".")[0]:
+        logger.error(f"Original and preview file paths do not match: {original_file_path} vs {preview_file_path}")
 
     minio_client = await get_minio_storage()
     object_name = KnowledgeUtils.get_tmp_preview_file_object_name(original_file_path)
     async with aiofiles.open(preview_file_path, "rb") as file_obj:
         # Upload preview file tominio
-        await minio_client.put_object_tmp(
-            object_name=object_name, file=await file_obj.read()
-        )
+        await minio_client.put_object_tmp(object_name=object_name, file=await file_obj.read())
     return object_name
 
 
@@ -572,425 +404,11 @@ def parse_document_title(title: str) -> str:
     return title
 
 
-def read_chunk_text(
-        invoke_user_id: int,
-        input_file: str,
-        file_name: str,
-        separator: Optional[List[str]],
-        separator_rule: Optional[List[str]],
-        chunk_size: int,
-        chunk_overlap: int,
-        knowledge_id: Optional[int] = None,
-        retain_images: int = 1,
-        enable_formula: int = 1,
-        force_ocr: int = 1,
-        filter_page_header_footer: int = 0,
-        excel_rule: ExcelRule = None,
-        no_summary: bool = False,
-) -> (List[str], List[dict], str, Any):  # type: ignore
-    """
-    0：chunks text
-    1：chunks metadata
-    2：parse_type: etl4lm or un_etl4lm
-    3: ocr bbox data: maybe None
-    """
-    # Gets the title of the document summaryllm
-    llm = None
-    if not no_summary:
-        try:
-            llm, knowledge_llm = KnowledgeUtils.get_knowledge_abstract_llm(invoke_user_id)
-        except Exception as e:
-            logger.exception("knowledge_llm_error:")
-            raise KnowledgeLLMError()
-
-    text_splitter = ElemCharacterTextSplitter(
-        separators=separator,
-        separator_rule=separator_rule,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        is_separator_regex=True,
-    )
-    # Load document content
-    logger.info(f"start_file_loader file_name={file_name}")
-    parse_type = ParseType.UN_ETL4LM.value
-    # excel File processing comes out separately
-    partitions = []
-    texts = []
-    etl_for_lm_url = settings.get_knowledge().etl4lm.url
-    file_extension_name = file_name.split(".")[-1].lower()
-
-    if file_extension_name in ["xls", "xlsx", "csv"]:
-        # set default values.
-        if not excel_rule:
-            excel_rule = ExcelRule()
-
-        # convert excel contents to markdown
-        md_files_path, local_image_dir, doc_id = convert_file_to_md(
-            file_name=file_name,
-            input_file_name=input_file,
-            header_rows=[
-                excel_rule.header_start_row - 1,  # convert to 0-based index
-                excel_rule.header_end_row - 1,
-            ],
-            data_rows=excel_rule.slice_length,
-            append_header=excel_rule.append_header,
-            retain_images=bool(retain_images),
-        )
-
-        # skip following processes and return splited values.
-        texts, documents = combine_multiple_md_files_to_raw_texts(path=md_files_path)
-
-    elif file_extension_name in ["doc", "docx", "html", "mhtml", "ppt", "pptx"]:
-
-        if file_extension_name == "doc":
-            # convert doc to docx
-            input_file = convert_doc_to_docx(input_doc_path=input_file)
-            if not input_file:
-                raise Exception(
-                    f"failed to convert {file_name} to docx, please check backend log"
-                )
-        elif file_extension_name == "ppt":
-            input_file = convert_ppt_to_pptx(input_path=input_file)
-            if not input_file:
-                raise Exception("failed convert ppt to pptx, please check backend log")
-
-        md_file_name, local_image_dir, doc_id = convert_file_to_md(
-            file_name=file_name,
-            input_file_name=input_file,
-            knowledge_id=knowledge_id,
-            retain_images=bool(retain_images),
-        )
-
-        if not md_file_name:
-            raise Exception(f"failed to parse {file_name}, please check backend log")
-
-        # save images to minio
-        if local_image_dir and retain_images == 1:
-            put_images_to_minio(
-                local_image_dir=local_image_dir,
-                knowledge_id=knowledge_id,
-                doc_id=doc_id,
-            )
-        # will bepptxSave as preview file to
-        if file_extension_name in ["ppt", "pptx"]:
-            ppt_pdf_path = convert_ppt_to_pdf(input_path=input_file)
-            if ppt_pdf_path:
-                upload_preview_file_to_minio(input_file, ppt_pdf_path)
-        elif file_extension_name == "doc":
-            upload_preview_file_to_minio(
-                input_file.replace(".docx", ".doc"), input_file
-            )
-
-        # Handle it the same way you didmdDoc.
-        loader = filetype_load_map["md"](file_path=md_file_name, autodetect_encoding=True)
-        documents = loader.load()
-
-    elif file_extension_name in ["txt", "md"]:
-        loader = filetype_load_map[file_extension_name](file_path=input_file, autodetect_encoding=True)
-        documents = loader.load()
-    else:
-        if etl_for_lm_url:
-            if file_extension_name in ["pdf"]:
-                # Determine if the document is damaged
-                if is_pdf_damaged(input_file):
-                    raise KnowledgeFileDamagedError()
-            etl4lm_settings = settings.get_knowledge().etl4lm
-            parse_type = ParseType.ETL4LM.value
-            try:
-                loader = Etl4lmLoader(
-                    file_name,
-                    input_file,
-                    unstructured_api_url=etl4lm_settings.url,
-                    ocr_sdk_url=etl4lm_settings.ocr_sdk_url,
-                    force_ocr=bool(force_ocr),
-                    enable_formular=bool(enable_formula),
-                    timeout=etl4lm_settings.timeout,
-                    filter_page_header_footer=bool(filter_page_header_footer),
-                    knowledge_id=knowledge_id,
-                )
-                documents = loader.load()
-            except Exception as e:
-                raise EtlException(str(e)) from e
-            partitions = loader.partitions
-            partitions = parse_partitions(partitions)
-        else:
-            if file_extension_name in ['pdf']:
-                md_file_name, local_image_dir, doc_id = convert_file_to_md(
-                    file_name=file_name,
-                    input_file_name=input_file,
-                    knowledge_id=knowledge_id,
-                    retain_images=bool(retain_images),
-                )
-                if not md_file_name: raise Exception(f"failed to parse {file_name}, please check backend log")
-
-                # save images to minio
-                if local_image_dir and retain_images == 1:
-                    put_images_to_minio(
-                        local_image_dir=local_image_dir,
-                        knowledge_id=knowledge_id,
-                        doc_id=doc_id,
-                    )
-                    # Handle it the same way you didmdDoc.
-                loader = filetype_load_map["md"](file_path=md_file_name)
-                documents = loader.load()
-            else:
-                if file_extension_name not in filetype_load_map:
-                    raise KnowledgeFileNotSupportedError()
-                loader = filetype_load_map[file_extension_name](file_path=input_file)
-                documents = loader.load()
-
-    logger.info(f"start_extract_title file_name={file_name}")
-    if llm:
-        t = time.time()
-        for one in documents:
-            # Configured correlationllmIf so, summarize the document
-            title = extract_title(
-                llm=llm,
-                text=one.page_content,
-                abstract_prompt=knowledge_llm.abstract_prompt,
-            )
-            # remove <think>.*</think> tag content
-            one.metadata["title"] = parse_document_title(title)
-        logger.info("file_extract_title=success timecost={}", time.time() - t)
-
-    if file_extension_name in ["xls", "xlsx", "csv"]:
-        for one in texts:
-            one.metadata["title"] = documents[0].metadata.get("title", "")
-    else:
-        logger.info(f"start_split_text file_name={file_name}")
-        texts = text_splitter.split_documents(documents)
-
-    raw_texts = [t.page_content for t in texts]
-    logger.info(f"start_process_metadata file_name={file_name}")
-    metadatas = [
-
-        Metadata(
-            bbox=json.dumps({"chunk_bboxes": t.metadata.get("chunk_bboxes", "")}),
-            page=(
-                t.metadata["chunk_bboxes"][0].get("page")
-                if t.metadata.get("chunk_bboxes", None)
-                else t.metadata.get("page", 0)
-            ),
-            document_name=file_name,
-            abstract=t.metadata.get("title", ""),
-            chunk_index=t_index,
-            user_metadata={}
-        )
-        for t_index, t in enumerate(texts)
-    ]
-    logger.info(f"file_chunk_over file_name=={file_name}")
-    return raw_texts, metadatas, parse_type, partitions
-
-
-async def async_read_chunk_text(
-        invoke_user_id: int,
-        input_file: str,
-        file_name: str,
-        separator: Optional[List[str]],
-        separator_rule: Optional[List[str]],
-        chunk_size: int,
-        chunk_overlap: int,
-        knowledge_id: Optional[int] = None,
-        retain_images: int = 1,
-        enable_formula: int = 1,
-        force_ocr: int = 1,
-        filter_page_header_footer: int = 0,
-        excel_rule: ExcelRule = None,
-        no_summary: bool = False,
-) -> (List[str], List[Metadata], str, Any):  # type: ignore
-    """Asynchronous version of read_chunk_text"""
-    llm = None
-    if not no_summary:
-        try:
-            llm = await async_decide_knowledge_llm(invoke_user_id)
-            knowledge_llm = await LLMService.aget_knowledge_llm()
-        except Exception as e:
-            logger.exception("knowledge_llm_error:")
-            raise Exception(
-                f"Documentation Knowledge Base Summary Model is no longer valid, please go to Model Management-Configure in System Model Settings.{str(e)}"
-            )
-
-    text_splitter = ElemCharacterTextSplitter(
-        separators=separator,
-        separator_rule=separator_rule,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        is_separator_regex=True,
-    )
-    # Load document content
-    logger.info(f"start_file_loader file_name={file_name}")
-    parse_type = ParseType.UN_ETL4LM.value
-    # excel File processing comes out separately
-    partitions = []
-    texts = []
-    etl_for_lm_url = (await settings.async_get_knowledge()).etl4lm.url
-    file_extension_name = file_name.split(".")[-1].lower()
-
-    if file_extension_name in ["xls", "xlsx", "csv"]:
-        # set default values.
-        if not excel_rule:
-            excel_rule = ExcelRule()
-
-        # convert excel contents to markdown
-        md_files_path, local_image_dir, doc_id = await util.sync_func_to_async(convert_file_to_md)(
-            file_name=file_name,
-            input_file_name=input_file,
-            header_rows=[
-                excel_rule.header_start_row - 1,  # convert to 0-based index
-                excel_rule.header_end_row - 1,
-            ],
-            data_rows=excel_rule.slice_length,
-            append_header=excel_rule.append_header,
-            retain_images=bool(retain_images),
-        )
-
-        # skip following processes and return splited values.
-        texts, documents = await util.sync_func_to_async(combine_multiple_md_files_to_raw_texts)(path=md_files_path)
-
-    elif file_extension_name in ["doc", "docx", "html", "mhtml", "ppt", "pptx"]:
-
-        if file_extension_name == "doc":
-            # convert doc to docx
-            input_file = await util.sync_func_to_async(convert_doc_to_docx)(input_doc_path=input_file)
-            if not input_file:
-                raise Exception(
-                    f"failed to convert {file_name} to docx, please check backend log"
-                )
-        elif file_extension_name == "ppt":
-            input_file = await asyncio.to_thread(convert_ppt_to_pptx, input_path=input_file)
-            if not input_file:
-                raise Exception("failed convert ppt to pptx, please check backend log")
-        md_file_name, local_image_dir, doc_id = await util.sync_func_to_async(convert_file_to_md)(
-            file_name=file_name,
-            input_file_name=input_file,
-            knowledge_id=knowledge_id,
-            retain_images=bool(retain_images),
-        )
-
-        if not md_file_name:
-            raise Exception(f"failed to parse {file_name}, please check backend log")
-
-        # save images to minio
-        if local_image_dir and retain_images == 1:
-            await async_images_to_minio(
-                local_image_dir=local_image_dir,
-                knowledge_id=knowledge_id,
-                doc_id=doc_id,
-            )
-        # will bepptxSave as preview file to
-        if file_extension_name in ["ppt", "pptx"]:
-            ppt_pdf_path = await util.sync_func_to_async(convert_ppt_to_pdf)(input_path=input_file)
-            if ppt_pdf_path:
-                await async_upload_preview_file_to_minio(input_file, ppt_pdf_path)
-        elif file_extension_name == "doc":
-            await async_upload_preview_file_to_minio(
-                input_file.replace(".docx", ".doc"), input_file
-            )
-
-        # Handle it the same way you didmdDoc.
-        loader = filetype_load_map["md"](file_path=md_file_name, autodetect_encoding=True)
-        documents = await loader.aload()
-
-    elif file_extension_name in ["txt", "md"]:
-        loader = filetype_load_map[file_extension_name](file_path=input_file, autodetect_encoding=True)
-        documents = await loader.aload()
-    else:
-        if etl_for_lm_url:
-            if file_extension_name in ["pdf"]:
-                # Determine if the document is damaged
-                if is_pdf_damaged(input_file):
-                    raise Exception('The file is damaged.')
-            etl4lm_settings = (await settings.async_get_knowledge()).etl4lm
-            loader = Etl4lmLoader(
-                file_name,
-                input_file,
-                unstructured_api_url=etl4lm_settings.url,
-                ocr_sdk_url=etl4lm_settings.ocr_sdk_url,
-                force_ocr=bool(force_ocr),
-                enable_formular=bool(enable_formula),
-                timeout=etl4lm_settings.timeout,
-                filter_page_header_footer=bool(filter_page_header_footer),
-                knowledge_id=knowledge_id,
-            )
-            documents = await loader.aload()
-            parse_type = ParseType.ETL4LM.value
-            partitions = loader.partitions
-            partitions = parse_partitions(partitions)
-        else:
-            if file_extension_name in ['pdf']:
-                md_file_name, local_image_dir, doc_id = await util.sync_func_to_async(convert_file_to_md)(
-                    file_name=file_name,
-                    input_file_name=input_file,
-                    knowledge_id=knowledge_id,
-                    retain_images=bool(retain_images),
-                )
-                if not md_file_name: raise Exception(f"failed to parse {file_name}, please check backend log")
-
-                # save images to minio
-                if local_image_dir and retain_images == 1:
-                    await async_images_to_minio(
-                        local_image_dir=local_image_dir,
-                        knowledge_id=knowledge_id,
-                        doc_id=doc_id,
-                    )
-                    # Handle it the same way you didmdDoc.
-                loader = filetype_load_map["md"](file_path=md_file_name)
-                documents = await loader.aload()
-            else:
-                if file_extension_name not in filetype_load_map:
-                    raise Exception("Type not supported")
-                loader = filetype_load_map[file_extension_name](file_path=input_file)
-                documents = await loader.aload()
-
-    logger.info(f"start_extract_title file_name={file_name}")
-    if llm:
-        t = time.time()
-        for one in documents:
-            # Configured correlationllmIf so, summarize the document
-            title = await async_extract_title(
-                llm=llm,
-                text=one.page_content,
-                abstract_prompt=knowledge_llm.abstract_prompt,
-            )
-            # remove <think>.*</think> tag content
-            one.metadata["title"] = parse_document_title(title)
-        logger.info("file_extract_title=success timecost={}", time.time() - t)
-
-    if file_extension_name in ["xls", "xlsx", "csv"]:
-        for one in texts:
-            one.metadata["title"] = documents[0].metadata.get("title", "")
-    else:
-        logger.info(f"start_split_text file_name={file_name}")
-        texts = text_splitter.split_documents(documents)
-
-    raw_texts = [t.page_content for t in texts]
-    logger.info(f"start_process_metadata file_name={file_name}")
-    metadatas = [
-
-        Metadata(
-            bbox=json.dumps({"chunk_bboxes": t.metadata.get("chunk_bboxes", "")}),
-            page=(
-                t.metadata["chunk_bboxes"][0].get("page")
-                if t.metadata.get("chunk_bboxes", None)
-                else t.metadata.get("page", 0)
-            ),
-            document_name=file_name,
-            abstract=t.metadata.get("title", ""),
-            chunk_index=t_index,
-            user_metadata={}
-        )
-        for t_index, t in enumerate(texts)
-    ]
-    logger.info(f"file_chunk_over file_name=={file_name}")
-    return raw_texts, metadatas, parse_type, partitions
-
-
-def text_knowledge(
-        db_knowledge: Knowledge, db_file: KnowledgeFile, documents: List[Document]
-):
+def text_knowledge(db_knowledge: Knowledge, db_file: KnowledgeFile, documents: list[Document]):
     """Usetext Importknowledge"""
-    vectore_client = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(invoke_user_id=db_file.user_id,
-                                                                         knowledge=db_knowledge)
+    vectore_client = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(
+        invoke_user_id=db_file.user_id, knowledge=db_knowledge
+    )
     logger.info("vector_init_conn_done milvus={}", db_knowledge.collection_name)
     es_client = KnowledgeRag.init_knowledge_es_vectorstore_sync(knowledge=db_knowledge)
 
@@ -1031,15 +449,11 @@ def text_knowledge(
             }
             for index, doc in enumerate(documents)
         ]
-        vectore_client.add_texts(
-            texts=[t.page_content for t in texts], metadatas=metadata
-        )
+        vectore_client.add_texts(texts=[t.page_content for t in texts], metadatas=metadata)
 
         # Storagees
         if es_client:
-            es_client.add_texts(
-                texts=[t.page_content for t in texts], metadatas=metadata
-            )
+            es_client.add_texts(texts=[t.page_content for t in texts], metadatas=metadata)
         db_file.status = 2
         result["status"] = 2
         with get_sync_db_session() as session:
@@ -1047,8 +461,8 @@ def text_knowledge(
             session.commit()
     except Exception as e:
         logger.error(e)
-        setattr(db_file, "status", 3)
-        setattr(db_file, "remark", str(e)[:500])
+        db_file.status = 3
+        db_file.remark = str(e)[:500]
         with get_sync_db_session() as session:
             session.add(db_file)
             session.commit()
@@ -1068,13 +482,11 @@ def QA_save_knowledge(db_knowledge: Knowledge, QA: QAKnowledge):
     extra.update({"answer": answer, "main_question": questions[0]})
     docs = [Document(page_content=question, metadata=extra) for question in questions]
     try:
-        vector_client = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(invoke_user_id=QA.user_id,
-                                                                            knowledge=db_knowledge,
-                                                                            metadata_schemas=QA_KNOWLELDGE_METADATA_SCHEMA)
-        es_client = KnowledgeRag.init_knowledge_es_vectorstore_sync(knowledge=db_knowledge)
-        logger.info(
-            f"vector_init_conn_done col={db_knowledge.collection_name} index={db_knowledge.index_name}"
+        vector_client = KnowledgeRag.init_knowledge_milvus_vectorstore_sync(
+            invoke_user_id=QA.user_id, knowledge=db_knowledge, metadata_schemas=QA_KNOWLELDGE_METADATA_SCHEMA
         )
+        es_client = KnowledgeRag.init_knowledge_es_vectorstore_sync(knowledge=db_knowledge)
+        logger.info(f"vector_init_conn_done col={db_knowledge.collection_name} index={db_knowledge.index_name}")
         # Unificationdocument
         metadata = [
             QAKnowledgeMetadata(
@@ -1089,19 +501,17 @@ def QA_save_knowledge(db_knowledge: Knowledge, QA: QAKnowledge):
             ).model_dump()
             for index, doc in enumerate(docs)
         ]
-        vector_client.add_texts(
-            texts=[t.page_content for t in docs], metadatas=metadata
-        )
-        logger.info(f"qa_save_knowledge add vector over")
+        vector_client.add_texts(texts=[t.page_content for t in docs], metadatas=metadata)
+        logger.info("qa_save_knowledge add vector over")
         es_client.add_texts(texts=[t.page_content for t in docs], metadatas=metadata)
-        logger.info(f"qa_save_knowledge add es over")
+        logger.info("qa_save_knowledge add es over")
 
         QA.status = QAStatus.ENABLED.value
         KnowledgeFileDao.update(QA)
     except Exception as e:
         logger.error(e)
-        setattr(QA, "status", QAStatus.FAILED.value)
-        setattr(QA, "remark", KnowledgeFileFailedError(exception=e).to_json_str())
+        QA.status = QAStatus.FAILED.value
+        QA.remark = KnowledgeFileFailedError(exception=e).to_json_str()
         KnowledgeFileDao.update(QA)
 
     return QA
@@ -1125,9 +535,7 @@ def add_qa(db_knowledge: Knowledge, data: QAKnowledgeUpsert) -> QAKnowledge:
             else:
                 qa = QAKnoweldgeDao.insert_qa(data)
                 telemetry_service.log_event_sync(
-                    user_id=qa.user_id,
-                    event_type=BaseTelemetryTypeEnum.NEW_KNOWLEDGE_FILE,
-                    trace_id=trace_id_var.get()
+                    user_id=qa.user_id, event_type=BaseTelemetryTypeEnum.NEW_KNOWLEDGE_FILE, trace_id=trace_id_var.get()
                 )
 
             # Right.questionTo be performedembedding, and then enter the Knowledge Base
@@ -1156,21 +564,19 @@ def qa_status_change(qa_db: QAKnowledge, target_status: int, db_knowledge: Knowl
 
 
 async def list_qa_by_knowledge_id(
-        knowledge_id: int,
-        page_size: int = 10,
-        page_num: int = 1,
-        question: Optional[str] = None,
-        answer: Optional[str] = None,
-        keyword: Optional[str] = None,
-        status: Optional[int] = None,
+    knowledge_id: int,
+    page_size: int = 10,
+    page_num: int = 1,
+    question: str | None = None,
+    answer: str | None = None,
+    keyword: str | None = None,
+    status: int | None = None,
 ) -> list[Any] | tuple[Any, Any]:
     """Get all under knowledge baseqa"""
     if not knowledge_id:
         return []
 
-    count_sql = select(func.count(QAKnowledge.id)).where(
-        QAKnowledge.knowledge_id == knowledge_id
-    )
+    count_sql = select(func.count(QAKnowledge.id)).where(QAKnowledge.knowledge_id == knowledge_id)
     list_sql = select(QAKnowledge).where(QAKnowledge.knowledge_id == knowledge_id)
 
     if status:
@@ -1199,18 +605,14 @@ async def list_qa_by_knowledge_id(
             )
         )
 
-    list_sql = (
-        list_sql.order_by(QAKnowledge.update_time.desc())
-        .limit(page_size)
-        .offset((page_num - 1) * page_size)
-    )
+    list_sql = list_sql.order_by(QAKnowledge.update_time.desc()).limit(page_size).offset((page_num - 1) * page_size)
     count = await QAKnoweldgeDao.total_count(count_sql)
     list_qa = await QAKnoweldgeDao.query_by_condition(list_sql)
 
     return list_qa, count
 
 
-def delete_vector_data(knowledge: Knowledge, file_ids: List[int]):
+def delete_vector_data(knowledge: Knowledge, file_ids: list[int]):
     """Delete vector data, Want to make a general purpose that can be dockedlangchainright of privacyvectorDB"""
     # for qa knowledge!!!
     embeddings = FakeEmbeddings()
@@ -1231,8 +633,10 @@ def delete_vector_data(knowledge: Knowledge, file_ids: List[int]):
     return True
 
 
-def recommend_question(invoke_user_id: int, question: str, answer: str, number: int = 3) -> List[str]:
-    from langchain.chains.llm import LLMChain
+def recommend_question(
+    invoke_user_id: int, question: str, answer: str, number: int = 3, tenant_id: int | None = None
+) -> list[str]:
+    from langchain_classic.chains.llm import LLMChain
     from langchain_core.prompts.prompt import PromptTemplate
 
     prompt = """- Role: Problem Generation Specialist
@@ -1260,7 +664,7 @@ def recommend_question(invoke_user_id: int, question: str, answer: str, number: 
 
         You generated{number}similar questions:
     """
-    llm = LLMService.get_knowledge_similar_llm(invoke_user_id)
+    llm = LLMService.get_knowledge_similar_llm(invoke_user_id, tenant_id=tenant_id)
     if not llm:
         raise KnowledgeSimilarError.http_exception()
 

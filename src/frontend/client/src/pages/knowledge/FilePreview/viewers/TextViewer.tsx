@@ -32,7 +32,7 @@ export function TextViewer({ fileUrl, zoomLevel }: TextViewerProps) {
 
     if (loading) {
         return (
-            <div className="flex-1 flex items-center justify-center text-[#86909c]">
+            <div className="flex-1 flex items-center justify-center text-text-3">
                 {localize("com_knowledge.loading")}</div>
         );
     }
@@ -40,7 +40,7 @@ export function TextViewer({ fileUrl, zoomLevel }: TextViewerProps) {
     if (error) {
         return (
             <div className="flex-1 flex items-center justify-center">
-                <div className="flex flex-col items-center gap-3 text-[#86909c]">
+                <div className="flex flex-col items-center gap-3 text-text-3">
                     <div className="text-4xl">📄</div>
                     <p>{error}</p>
                 </div>
@@ -51,7 +51,7 @@ export function TextViewer({ fileUrl, zoomLevel }: TextViewerProps) {
     const scale = zoomLevel / 100;
 
     return (
-        <div className="flex-1 overflow-auto bg-[#fbfbfb]">
+        <div className="scrollbar-os flex-1 overflow-auto bg-[#fbfbfb]">
             <div className="flex justify-center py-6 px-4">
                 <div
                     className="bg-white shadow-md max-w-[800px] w-full rounded-sm"
@@ -60,7 +60,7 @@ export function TextViewer({ fileUrl, zoomLevel }: TextViewerProps) {
                         transformOrigin: "top center",
                     }}
                 >
-                    <pre className="p-10 text-sm leading-relaxed text-[#1d2129] font-mono whitespace-pre-wrap break-words">
+                    <pre className="p-10 text-sm leading-relaxed text-text-1 font-mono whitespace-pre-wrap break-words">
                         {content}
                     </pre>
                 </div>

@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { Alert, AlertDescription } from '@/components/bs-ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/bs-ui/card';
 import Skeleton from '@/components/bs-ui/skeleton';
@@ -59,7 +60,7 @@ const enum API_TYPE {
 }
 
 const NoLoginLink = ({ type, noLogin = false }) => {
-  const [isCopied, setIsCopied] = useState<Boolean>(false);
+  const [isCopied, setIsCopied] = useState<boolean>(false);
   const { t } = useTranslation()
   const { id } = useParams()
 
@@ -74,8 +75,8 @@ const NoLoginLink = ({ type, noLogin = false }) => {
 
   const [embed, setEmbed] = useState(false)
   const url = useMemo(() => {
-    const loginUrl = `${location.origin}${__APP_ENV__.BASE_URL}/chat/${type}/auth/${id}`
-    const noLoginUrl = `${location.origin}${__APP_ENV__.BASE_URL}/chat/${type === API_TYPE.SKILL ? '' : type+'/'}${id}`
+    const loginUrl = `${location.origin}${__APP_ENV__.BASE_URL}/workspace/chat/${type}/auth/${id}`
+    const noLoginUrl = `${location.origin}${__APP_ENV__.BASE_URL}/workspace/chat/${type === API_TYPE.SKILL ? '' : type + '/'}${id}`
     return noLogin ? noLoginUrl : loginUrl;
   }, [type, noLogin])
 

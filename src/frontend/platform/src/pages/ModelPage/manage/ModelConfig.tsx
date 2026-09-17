@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { LoadingIcon } from "@/components/bs-icons/loading";
 import { bsConfirm } from "@/components/bs-ui/alertDialog/useConfirm";
 import { Button, LoadButton } from "@/components/bs-ui/button";
@@ -9,14 +10,18 @@ import { useToast } from "@/components/bs-ui/toast/use-toast";
 import { QuestionTooltip } from "@/components/bs-ui/tooltip";
 import { generateUUID } from "@/components/bs-ui/utils";
 import ShadTooltip from "@/components/ShadTooltipComponent";
+import { locationContext } from "@/contexts/locationContext";
+import { userContext } from "@/contexts/userContext";
 import { addLLmServer, deleteLLmServer, getLLmServerDetail, updateLLmServer } from "@/controllers/API/finetune";
 import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
+import { useAdminScope } from "@/hooks/useAdminScope";
 import { ArrowLeft, Plus, Settings, Trash2Icon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import CustomForm from "./CustomForm";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/bs-ui/dialog";
 import { getAdvancedParamsTemplate, templateToJsonString } from "@/util/advancedParamsTemplates";
+import { canShareToChildren, isGlobalSuperUser } from "./permissions";
 import { useLinsightConfig } from "./tabs/WorkbenchModel";
 import { useModelProviderInfo } from "./useLink";
 import { t } from "i18next";
@@ -56,7 +61,7 @@ function ModelItem({ data, type, onDelete, onInput, onConfig }) {
         setSavedInputParams(userSavedParams);
 
         const template = getAdvancedParamsTemplate(type, model.model_type as 'llm' | 'embedding') || {};
-        const newPlaceholder = templateToJsonString(template) || '{"temperature": 0.7, "top_p": 0.9}';
+        const newPlaceholder = templateToJsonString(template) || '{"temperature": 1, "top_p": 0.9}';
         setAdvancedParams(newPlaceholder);
         setOriginalAdvancedParams(newPlaceholder);
 
@@ -392,15 +397,40 @@ const defaultForm = {
     limit_flag: false,
     limit: 1,
     config: {},
-    models: []
+    models: [],
+    // Root-only switch; default true to match backend LLMServerCreateReq
+    // default and v2.5.1 decision-2 ("default share, opt-out via UI").
+    share_to_children: true,
+    // Echoed by the backend so we can hide the toggle on Root servers
+    // viewed under a Child scope (those rows are read-only anyway).
+    is_root_shared_readonly: false,
+    tenant_id: undefined,
 }
 
 export default function ModelConfig({ id, onGetName, onBack, onReload, onBerforSave, onAfterSave }) {
     const { t } = useTranslation()
     const { refetch: refetchConfig } = useLinsightConfig();
+    const { user } = useContext(userContext);
+    const { appConfig } = useContext(locationContext);
 
     const [formData, setFormData] = useState({ ...defaultForm })
     const [modelRefs, setModelRefs] = useState({});
+
+    // Create mode reads the admin scope fresh instead of taking it from the
+    // list page: the scope is a server-side lease that can expire while the
+    // user sits on the list, and only the value at open time matches the
+    // tenant the backend will write on save.
+    const isCreate = id === -1;
+    const { scope: adminScope } = useAdminScope({
+        enabled: appConfig.multiTenantEnabled && isGlobalSuperUser(user) && isCreate,
+    });
+    const showShareToggle = canShareToChildren({
+        multiTenantEnabled: appConfig.multiTenantEnabled,
+        user,
+        isCreate,
+        serverTenantId: formData.tenant_id,
+        scopeTenantId: adminScope.scope_tenant_id,
+    });
 
     useEffect(() => {
         if (id === -1) return
@@ -607,7 +637,7 @@ export default function ModelConfig({ id, onGetName, onBack, onReload, onBerforS
             </ShadTooltip>
             <span>{id === -1 ? t('model.addModel') : t('model.modelConfiguration')}</span>
         </div>
-        <div className="w-[50%] min-w-64 px-4 pb-10 mx-auto mt-6 h-[calc(100vh-220px)] overflow-y-auto">
+        <div className="w-[50%] min-w-64 px-4 pb-10 mx-auto mt-6 h-[calc(100vh-220px-var(--license-banner-h,0px))] overflow-y-auto">
             <div className="mb-2">
                 <Label className="bisheng-label"> {t('model.interModelFormat')}</Label>
                 <Select value={formData.type} disabled={id !== -1} onValueChange={handleTypeChange}>
@@ -658,6 +688,19 @@ export default function ModelConfig({ id, onGetName, onBack, onReload, onBerforS
                         </div>
                     </div>
                 </div>
+                {showShareToggle && (
+                    <div className="mb-2">
+                        <div className="flex items-center gap-x-6">
+                            <Label className="bisheng-label">
+                                {t('model.shareToChildren')}
+                            </Label>
+                            <Switch
+                                checked={formData.share_to_children}
+                                onCheckedChange={(val) => setFormData(form => ({ ...form, share_to_children: val }))}
+                            />
+                        </div>
+                    </div>
+                )}
                 <div className="mb-2">
                     <Label className="bisheng-label">
                         {t('model.model')}

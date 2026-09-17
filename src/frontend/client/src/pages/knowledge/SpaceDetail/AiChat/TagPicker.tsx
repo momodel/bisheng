@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /**
  * TagPicker — floating popup that displays available tags.
  * Triggered when user types '#' in the chat input.
@@ -5,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { cn } from "~/utils";
-import { useLocalize } from "~/hooks";
+import { useLocalize, useScrollRevealRef } from "~/hooks";
 
 interface TagPickerProps {
     tags: string[];
@@ -18,6 +19,7 @@ export function TagPicker({ tags, searchText, onSelect, onClose }: TagPickerProp
     const localize = useLocalize();
     const [activeIndex, setActiveIndex] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
+    const listScrollRevealRef = useScrollRevealRef<HTMLDivElement>();
 
     // Filter tags by search text
     const filtered = tags.filter(t =>
@@ -54,18 +56,23 @@ export function TagPicker({ tags, searchText, onSelect, onClose }: TagPickerProp
     if (filtered.length === 0) {
         return (
             <div
-                ref={containerRef}
-                className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-[#e5e6eb] rounded-lg shadow-lg p-3 z-50"
+                ref={(el) => {
+                    containerRef.current = el;
+                }}
+                className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-border-base rounded-lg shadow-lg p-3 z-50"
             >
-                <p className="text-sm text-[#86909c] text-center">{localize("com_knowledge.no_matched_tags")}</p>
+                <p className="text-sm text-text-3 text-center">{localize("com_knowledge.no_matched_tags")}</p>
             </div>
         );
     }
 
     return (
         <div
-            ref={containerRef}
-            className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-[#e5e6eb] rounded-lg shadow-lg z-50 max-h-[200px] overflow-y-auto scrollbar-on-hover"
+            ref={(el) => {
+                containerRef.current = el;
+                listScrollRevealRef(el);
+            }}
+            className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-border-base rounded-lg shadow-lg z-50 max-h-[200px] overflow-y-auto scrollbar-on-scroll"
         >
             <div className="p-1.5">
                 {filtered.map((tag, i) => (
@@ -74,14 +81,14 @@ export function TagPicker({ tags, searchText, onSelect, onClose }: TagPickerProp
                         className={cn(
                             "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors",
                             i === activeIndex
-                                ? "bg-[#f2f3f5] text-[#1d2129]"
-                                : "text-[#4e5969] hover:bg-[#f7f8fa]"
+                                ? "bg-fill-2 text-text-1"
+                                : "text-text-2 hover:bg-fill-1"
                         )}
                         onMouseEnter={() => setActiveIndex(i)}
                         onClick={() => onSelect(tag)}
                     >
                         <span className="inline-flex items-center gap-1">
-                            <span className="text-[#165dff]">#</span>
+                            <span className="text-blue-500">#</span>
                             {tag}
                         </span>
                     </button>

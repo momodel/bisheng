@@ -1,0 +1,202 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from bisheng.common.constants.enums.telemetry import ApplicationTypeEnum
+from bisheng.common.errcode.permission import PermissionFGAUnavailableError
+from bisheng.tool.domain.const import ToolPresetType
+from bisheng.tool.domain.services.executor import ToolExecutor, ToolInitializationError
+
+
+@pytest.mark.asyncio
+async def test_preset_tool_execution_still_checks_exact_use_action(monkeypatch):
+    check_action = AsyncMock(return_value=True)
+    check_global_super = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.check_business_action",
+        check_action,
+    )
+    monkeypatch.setattr(
+        "bisheng.utils.http_middleware._check_is_global_super",
+        check_global_super,
+    )
+    tool_type = SimpleNamespace(
+        id=10,
+        tenant_id=5,
+        is_preset=ToolPresetType.PRESET.value,
+    )
+
+    await ToolExecutor._ensure_use_permission_async(tool_type, user_id=7)
+
+    login_user = check_action.await_args.args[0]
+    assert login_user.user_id == 7
+    assert login_user.tenant_id == 5
+    assert login_user.is_global_super is True
+    check_global_super.assert_awaited_once_with(7)
+    assert check_action.await_args.kwargs == {
+        "resource_type": "tool",
+        "resource_id": 10,
+        "action": "use",
+    }
+
+
+@pytest.mark.asyncio
+async def test_preset_tool_execution_never_falls_back_when_fga_fails(
+    monkeypatch,
+):
+    check_action = AsyncMock(side_effect=PermissionFGAUnavailableError())
+    monkeypatch.setattr(
+        "bisheng.utils.http_middleware._check_is_global_super",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.check_business_action",
+        check_action,
+    )
+    tool_type = SimpleNamespace(
+        id=10,
+        tenant_id=5,
+        is_preset=ToolPresetType.PRESET.value,
+    )
+
+    with pytest.raises(PermissionFGAUnavailableError):
+        await ToolExecutor._ensure_use_permission_async(tool_type, user_id=7)
+
+    login_user = check_action.await_args.args[0]
+    assert login_user.is_global_super is False
+
+
+@pytest.mark.asyncio
+async def test_init_by_tool_ids_can_skip_unauthorized_tools(monkeypatch):
+    tool_one = SimpleNamespace(id=1, type=10)
+    tool_two = SimpleNamespace(id=2, type=20)
+    type_one = SimpleNamespace(id=10)
+    type_two = SimpleNamespace(id=20)
+
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.GptsToolsDao.aget_list_by_ids",
+        AsyncMock(return_value=[tool_one, tool_two]),
+    )
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.GptsToolsDao.aget_all_tool_type",
+        AsyncMock(return_value=[type_one, type_two]),
+    )
+
+    async def ensure_permission(tool_type, user_id):
+        if tool_type.id == 20:
+            raise PermissionError("no tool permission")
+
+    monkeypatch.setattr(ToolExecutor, "_ensure_use_permission_async", ensure_permission)
+    monkeypatch.setattr(
+        ToolExecutor,
+        "_init_by_tool_and_type",
+        lambda tool, tool_type, **kwargs: f"tool:{tool.id}",
+    )
+
+    result = await ToolExecutor.init_by_tool_ids(
+        [1, 2],
+        app_id="assistant-1",
+        app_name="assistant",
+        app_type=ApplicationTypeEnum.ASSISTANT,
+        user_id=7,
+        skip_unauthorized=True,
+    )
+
+    assert result == ["tool:1"]
+
+
+@pytest.mark.asyncio
+async def test_init_by_tool_ids_still_raises_by_default(monkeypatch):
+    tool = SimpleNamespace(id=2, type=20)
+    tool_type = SimpleNamespace(id=20)
+
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.GptsToolsDao.aget_list_by_ids",
+        AsyncMock(return_value=[tool]),
+    )
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.GptsToolsDao.aget_all_tool_type",
+        AsyncMock(return_value=[tool_type]),
+    )
+
+    async def ensure_permission(tool_type, user_id):
+        raise PermissionError("no tool permission")
+
+    monkeypatch.setattr(ToolExecutor, "_ensure_use_permission_async", ensure_permission)
+
+    with pytest.raises(PermissionError):
+        await ToolExecutor.init_by_tool_ids(
+            [2],
+            app_id="direct-tool-use",
+            app_name="direct",
+            app_type=ApplicationTypeEnum.ASSISTANT,
+            user_id=7,
+        )
+
+
+@pytest.mark.asyncio
+async def test_init_by_tool_ids_error_includes_tool_identity(monkeypatch):
+    tool = SimpleNamespace(id=3, type=30, name="broken-api-tool")
+    tool_type = SimpleNamespace(id=30)
+
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.GptsToolsDao.aget_list_by_ids",
+        AsyncMock(return_value=[tool]),
+    )
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.GptsToolsDao.aget_all_tool_type",
+        AsyncMock(return_value=[tool_type]),
+    )
+    monkeypatch.setattr(ToolExecutor, "_ensure_use_permission_async", AsyncMock())
+
+    def fail_initialization(*args, **kwargs):
+        raise KeyError("properties")
+
+    monkeypatch.setattr(ToolExecutor, "_init_by_tool_and_type", fail_initialization)
+
+    with pytest.raises(ToolInitializationError) as exc_info:
+        await ToolExecutor.init_by_tool_ids(
+            [3],
+            app_id="assistant-1",
+            app_name="assistant",
+            app_type=ApplicationTypeEnum.ASSISTANT,
+            user_id=7,
+        )
+
+    assert str(exc_info.value) == ("Tool \"broken-api-tool\" (id=3) initialization failed: KeyError: 'properties'")
+    assert isinstance(exc_info.value.__cause__, KeyError)
+
+
+@pytest.mark.asyncio
+async def test_init_by_tool_id_error_includes_tool_identity(monkeypatch):
+    tool = SimpleNamespace(id=4, type=40, name="single-broken-tool")
+    tool_type = SimpleNamespace(id=40)
+
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.GptsToolsDao.aget_one_tool",
+        AsyncMock(return_value=tool),
+    )
+    monkeypatch.setattr(
+        "bisheng.tool.domain.services.executor.GptsToolsDao.aget_one_tool_type",
+        AsyncMock(return_value=tool_type),
+    )
+    monkeypatch.setattr(ToolExecutor, "_ensure_use_permission_async", AsyncMock())
+
+    def fail_initialization(*args, **kwargs):
+        raise ValueError("invalid configuration")
+
+    monkeypatch.setattr(ToolExecutor, "_init_by_tool_and_type", fail_initialization)
+
+    with pytest.raises(ToolInitializationError) as exc_info:
+        await ToolExecutor.init_by_tool_id(
+            tool_id=4,
+            app_id="assistant-1",
+            app_name="assistant",
+            app_type=ApplicationTypeEnum.ASSISTANT,
+            user_id=7,
+        )
+
+    assert str(exc_info.value) == (
+        'Tool "single-broken-tool" (id=4) initialization failed: ValueError: invalid configuration'
+    )

@@ -1,7 +1,10 @@
+// @ts-strict-ignore
 import { SettingIcon } from "@/components/bs-icons"
+import { Badge } from "@/components/bs-ui/badge"
 import { Button } from "@/components/bs-ui/button"
 import { Switch } from "@/components/bs-ui/switch"
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/bs-ui/table"
+import { locationContext } from "@/contexts/locationContext"
 import { userContext } from "@/contexts/userContext"
 import { useContext, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -9,16 +12,42 @@ import { useTranslation } from "react-i18next"
 import { LoadingIcon } from "@/components/bs-icons/loading"
 import { useToast } from "@/components/bs-ui/toast/use-toast"
 import { QuestionTooltip } from "@/components/bs-ui/tooltip"
-import { changeLLmServerStatus, getAssistantModelList, getModelListApi } from "@/controllers/API/finetune"
+import { changeLLmServerStatus, getAssistantModelList, getModelListApi, verifyLLmModelStatus } from "@/controllers/API/finetune"
 import { captureAndAlertRequestErrorHoc } from "@/controllers/request"
 import { CircleMinus, CirclePlus } from "lucide-react"
 import { useQuery } from "react-query"
+import { useSearchParams } from "react-router-dom"
 import ModelConfig from "./ModelConfig"
+import { canManageModelSettings } from "./permissions"
+import { ScopeBar } from "./ScopeBar"
 import SystemModelConfig from "./SystemModelConfig"
 
-function CustomTableRow({ data, index, user, onModel, onCheck }) {
+function CustomTableRow({ data, index, user, onModel, onCheck, onVerified }) {
     const { t } = useTranslation()
+    const { message } = useToast()
+    const { appConfig } = useContext(locationContext)
     const [expand, setExpand] = useState(false)
+    const [verifyingId, setVerifyingId] = useState(null)
+    const canManage = canManageModelSettings(user, appConfig.multiTenantEnabled)
+
+    // A probe is one real call to the model; keep it to the row the user asked
+    // for, and let other rows stay clickable while it runs.
+    const handleVerify = async (modelId) => {
+        if (verifyingId === modelId) return
+        setVerifyingId(modelId)
+        const res = await captureAndAlertRequestErrorHoc(verifyLLmModelStatus(modelId))
+        setVerifyingId(null)
+        if (res?.id) {
+            onVerified(data.id, res)
+            message({ description: t('model.statusUpdated'), variant: 'success' })
+        }
+    }
+
+    // Root-shared rows are read-only for the current caller; the backend
+    // sets `is_root_shared_readonly` on the list API so Child Admins do
+    // not hit the 403 + 19801 write path.
+    const isRootShared = !!data.is_root_shared_readonly
+    const canEdit = !isRootShared && canManage
 
     return <div className="text-sm bs-table-row">
         <div className={`grid grid-cols-2 transition-colors hover:bg-muted/50 items-center mt-1 mx-2 h-[52px] rounded-sm`}>
@@ -28,11 +57,19 @@ function CustomTableRow({ data, index, user, onModel, onCheck }) {
                         <CircleMinus className="cursor-pointer min-w-4 w-4 h-4" onClick={() => setExpand(false)} />
                         : <CirclePlus onClick={() => setExpand(true)} className="cursor-pointer min-w-4 w-4 h-4" />
                 }
-                {data.name}
+                <span>{data.name}</span>
+                {isRootShared && (
+                    <Badge variant="secondary" className="ml-2">
+                        {t('model.tenantSharedReadonly', {
+                            tenantName: data.tenant_name || 'Root',
+                            defaultValue: '{{tenantName}} 共享 · 只读',
+                        })}
+                    </Badge>
+                )}
             </div>
             <div className="bs-table-td h-full p-2 flex justify-end items-center gap-x-3 first:rounded-l-md last:rounded-r-md font-medium">
                 <Button variant="link" onClick={() => onModel(data.id)}
-                    disabled={user.role !== 'admin'}
+                    disabled={!canEdit}
                     className={`link px-0 pl-6`}>
                     {t('model.modelConfiguration')}
                 </Button>
@@ -46,12 +83,13 @@ function CustomTableRow({ data, index, user, onModel, onCheck }) {
                             <TableHead className="w-[200px]">{t('model.modelName')}</TableHead>
                             <TableHead className="w-[200px] min-w-[100px]">{t('model.modelType')}</TableHead>
                             <TableHead className="w-[200px] min-w-[100px]">{t('model.status')}</TableHead>
+                            <TableHead className="w-[180px] min-w-[140px]">{t('model.statusUpdateTime')}</TableHead>
                             <TableHead className="w-[100px] min-w-[100px]">{t('model.onlineOfflineOperation')}</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {data.models.map(m => (
-                            <TableRow key={m.id}>
+                            <TableRow key={m.id} className="group">
                                 <TableCell>{m.model_name}</TableCell>
                                 <TableCell>{m.model_type}</TableCell>
                                 <TableCell>
@@ -59,9 +97,28 @@ function CustomTableRow({ data, index, user, onModel, onCheck }) {
                                         {[t('model.available'), t('model.abnormal'), t('model.unknown')][m.status]}
                                     </span>
                                     {m.status === 1 && <QuestionTooltip className=" align-middle" content={m.remark} />}
+                                    {/* Verifying is a real call to the model, so it stays an
+                                        explicit per-row action rather than anything automatic. */}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={verifyingId === m.id}
+                                        onClick={() => handleVerify(m.id)}
+                                        className={`ml-2 h-6 rounded-md border-primary/30 bg-primary/5 px-2 align-middle text-xs font-normal text-primary shadow-none transition-opacity hover:bg-primary/10 hover:text-primary ${verifyingId === m.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                                    >
+                                        {verifyingId === m.id && <LoadingIcon className="mr-1 size-3" />}
+                                        {t('model.updateStatus')}
+                                    </Button>
+                                </TableCell>
+                                <TableCell className="text-gray-500">
+                                    {m.status_update_time?.replace('T', ' ') || '—'}
                                 </TableCell>
                                 <TableCell>
-                                    <Switch disabled={user.role !== 'admin'} checked={m.online} onCheckedChange={(bool) => onCheck(index, bool, m.id)} />
+                                    <Switch
+                                        disabled={!canEdit}
+                                        checked={m.online}
+                                        onCheckedChange={(bool) => onCheck(index, bool, m.id)}
+                                    />
                                 </TableCell>
                             </TableRow>
                         ))}
@@ -85,10 +142,27 @@ export default function Management() {
 
     const [data, setData] = useState([])
     const { user } = useContext(userContext)
+    const { appConfig } = useContext(locationContext)
     const [modelId, setModelId] = useState(null)
     const [systemModel, setSystemModel] = useState(false)
+    const [systemModelTab, setSystemModelTab] = useState<string | undefined>(undefined)
     const [loading, setLoading] = useState(false)
     const { refetch } = useModel()
+    const canManage = canManageModelSettings(user, appConfig.multiTenantEnabled)
+
+    const [searchParams, setSearchParams] = useSearchParams()
+    useEffect(() => {
+        const tab = searchParams.get('systemModel')
+        // Wait for model list to load before opening SystemModelConfig — otherwise
+        // AssisModel's ModelSelect sees empty options and nulls out existing model_ids.
+        if (tab && data.length > 0) {
+            setSystemModelTab(tab)
+            setSystemModel(true)
+            const next = new URLSearchParams(searchParams)
+            next.delete('systemModel')
+            setSearchParams(next, { replace: true })
+        }
+    }, [searchParams, setSearchParams, data])
 
     const reload = async () => {
         setLoading(true)
@@ -122,6 +196,20 @@ export default function Management() {
         setData([...data])
     }
 
+    // Patch the verified row from the response rather than refetching the whole
+    // list — a refetch would collapse nothing but does throw away the expanded
+    // state's scroll position for a single-row change.
+    const handleVerified = (serverId, model) => {
+        setData(prev => prev.map(server => server.id === serverId
+            ? {
+                ...server,
+                models: server.models.map(el => el.id === model.id
+                    ? { ...el, status: model.status, remark: model.remark, status_update_time: model.status_update_time }
+                    : el)
+            }
+            : server))
+    }
+
     if (modelId) return <ModelConfig
         id={modelId}
         onGetName={handleGetRepeatName}
@@ -134,7 +222,12 @@ export default function Management() {
         }}
     />
 
-    if (systemModel) return <SystemModelConfig data={data} onBack={() => setSystemModel(false)} />
+    if (systemModel) return <SystemModelConfig
+        data={data}
+        defaultTab={systemModelTab}
+        onTabChange={setSystemModelTab}
+        onBack={() => { setSystemModel(false); setSystemModelTab(undefined); }}
+    />
 
     return <div className="relative bg-background-login h-full px-2 py-4">
         {loading && (
@@ -143,13 +236,21 @@ export default function Management() {
             </div>
         )}
         <div className="h-full overflow-y-auto">
-            <div className="flex justify-end gap-4">
-                {user.role === 'admin' && <Button className="text-red-500" onClick={() => setSystemModel(true)} variant="secondary">
-                    <SettingIcon className="text-red-500" />
-                    {t('model.systemModelSettings')}
-                </Button>}
-                {user.role === 'admin' && <Button onClick={() => setModelId(-1)}>{t('model.addModel')}</Button>}
-                <Button className="bg-black-button" onClick={reload}>{t('model.refresh')}</Button>
+            {/* v2.5.1 F019: scope switcher lives here (LLM is the only page
+                whose data actually changes with scope). System-level config
+                stays super-admin only regardless of active scope. */}
+            <div className="flex items-center justify-between gap-4">
+                <div>
+                    {appConfig.multiTenantEnabled && <ScopeBar user={user} onScopeChange={reload} />}
+                </div>
+                <div className="flex gap-4">
+                    {canManage && <Button className="text-red-500" onClick={() => setSystemModel(true)} variant="secondary">
+                        <SettingIcon className="text-red-500" />
+                        {t('model.systemModelSettings')}
+                    </Button>}
+                    {canManage && <Button onClick={() => setModelId(-1)}>{t('model.addModel')}</Button>}
+                    <Button className="bg-black-button" onClick={reload}>{t('model.refresh')}</Button>
+                </div>
             </div>
             <div className="h-[85%]">
                 <div className="flex h-10 justify-between items-center font-medium text-muted-foreground text-sm">
@@ -164,6 +265,7 @@ export default function Management() {
                             data={d}
                             index={index}
                             onCheck={handleCheck}
+                            onVerified={handleVerified}
                             onModel={setModelId}
                         />)
                     }

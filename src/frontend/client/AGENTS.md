@@ -1,0 +1,40 @@
+# Frontend Rules — Client (End-user Chat UI)
+
+Auto-loaded when editing files in `src/frontend/client/`. Base path: `/workspace`.
+Cross-app boundary + hard rules common to both apps: root `AGENTS.md §4` (single source — not repeated here). The store-must-not-call-HTTP law: `docs/constitution.md` C7 (arch-guard RULE-6).
+
+## Commands (cwd: `src/frontend/client/`)
+
+```bash
+pnpm install   # run at src/frontend/ (pnpm workspace root; npm is disabled)
+pnpm dev       # dev server on :4001 (or `pnpm dev:client` from the workspace root)
+```
+
+## Tech Stack
+Vite 6 + React 18 + TypeScript + TailwindCSS 3 + Radix UI (shadcn/ui) + **Recoil** + **react-query v4 (@tanstack)** + react-i18next + react-router-dom v6 + **lucide-react** + axios (wrapped in `~/api/request.ts`)
+
+## Mandatory Rules (client-specific — common hard rules in root §4)
+- **Path Aliases**: `~/` (or `@/`) → `src/`.
+- **HTTP Requests**: wrapper is `~/api/request.ts`.
+- **State Management**: **Recoil is FROZEN** (archived by Meta; ledger #5) — no new atoms/selectors/`recoil` imports (lint-enforced via `no-restricted-imports`; existing usage is suppressed). Server state → react-query v4; local state → `useState`/props. If a feature genuinely needs new cross-page client state, raise it with shanghang (Jotai migration decision pending) — do not work around with Context or new libraries.
+- **UI Components**: shared library `@bisheng/ui` (`src/frontend/packages/ui/`) first — components migrated there (Button, …) keep re-export shims at `~/components/ui/<Name>` so both import paths work; everything else still lives in `~/components/ui/` (shadcn / Radix-based).
+- **Icons**: prefer `bisheng-icons` — `import { Outlined } from 'bisheng-icons'` → `<Outlined.Delete />` (variants `Outlined` / `Filled` / `Colored`). Use `lucide-react` ONLY as a fallback when `bisheng-icons` has no matching-semantic icon.
+  - **⚠️ After upgrading `bisheng-icons`**, clear the Vite pre-bundle cache or new icons crash the page (`Element type is invalid`): `pnpm dev -- --force` (or `rm -rf node_modules/.vite && pnpm dev`). Its git-source `exports` field defeats Vite's dep-change detection, so the stale pre-bundled snapshot is served unless forced.
+- **Toast**: `const { showToast } = useToastContext(); showToast?.({ message, severity: 'error' | 'success' })`.
+- **i18n**: `useLocalize()` from `~/hooks` → `localize()`. Locale files at `src/locales/{en,zh-Hans,ja}/translation.json` (single file). New keys use nested namespace format (see `/i18n-localizer` skill).
+- **Brand theme (blue⇄green)**: brand-colored UI MUST follow the theme — **never hardcode brand hex** (`#165DFF`/`#024DE3`/`#19B476`/`#187C54`…).
+  - Use `blue-*` classes (they're re-pointed to `--brand-*` vars → auto-follow; `blue-*` means "brand", not literal blue) or `rgb(var(--brand-NNN))` in inline style/CSS.
+  - **Primary filled button**: `<Button>` (default variant, already themed). Hand-rolled `bg-blue-500 text-white` MUST also add the `btn-brand-primary` class. Brand-tinted secondary: `<Button variant="secondaryBrand">`.
+  - **Tints**: selection/active `bg-blue-500/[0.07]`, header `…/[0.05]`. Tailwind arbitrary values can't contain spaces: `rgb(var(--brand-500)/0.04)` ✅.
+  - **Illustrations**: inline SVG, `fill`/`stroke` = `rgb(var(--illus-NNN))` (separate brighter palette, in `src/components/illustrations/`). SVG presentation attrs ignore `var()` → use inline `style`/className/CSS-mask, and `useId()` to dedupe gradient/clip ids.
+  - **Do NOT theme**: semantic colors (success `#00b42a` / danger `#f53f3f` / warning `#ff7d00`), type colors (skill-purple, assistant-orange), third-party logos. Need a muted-but-themed brand color → `rgb(var(--brand-muted))`.
+  - Full guide: `BRAND-THEME-HANDOFF.md`.
+- **Design system (hard rules — full specs in `packages/ui/docs/`, site: `pnpm dev:ui`)**:
+  - Where a `@bisheng/ui` component exists, USE it — no hand-rolled equivalents. Buttons: `<Button>` dual-axis API (`color` × `variant` × `size`); never hand-write button heights/padding/radius; adjacent buttons same size; one primary-solid per action area.
+  - Button `loading` prop only — never inject your own Spinner. `iconOnly` requires `aria-label` + Tooltip.
+  - Typography (new code): semantic classes `text-caption/body-sm/body/h4…h1` (auto-remap ≤768px) — not raw `text-sm/base` (基础-字体规范.md).
+  - Neutral colors (new code): semantic tokens `text-text-1…4` / `bg-fill-1…4` / `border-border-base|-deep` / `success|warning|danger` — never `text-gray-*` or hex (基础-色彩规范.md).
+  - Hover/touch: plain `hover:` classes ONLY (`hoverOnlyWhenSupported` disables them on touch app-wide) — **never invent hover variant prefixes**; touch press via `coarse-pointer:active:`; hover/active shade stays within the base color's own ramp (no cross-palette graying).
+
+## Known Pitfalls
+- **`useLocalize()` return value is unstable**: `~/hooks/useLocalize.ts` returns a new arrow-function identity on every render (no memoization). Any `useCallback`/`useMemo` that lists `localize` in its deps is therefore also unstable every render. Never let such a callback sit in a `useEffect` dep array that's meant to run only when real data changes (e.g. a "hydrate form from server response" effect) — the effect will silently re-fire on every render and can reset in-progress user input/toggles on every keystroke. Found in `ChannelSettings/useChannelSettingsForm.ts` (`initBusinessFromChannel` dep), symptom: edit-page inputs/switches appeared unresponsive because the fetched detail was re-applied after every keystroke. Guard "run once when data arrives" effects with a ref/id check instead of relying on function-reference deps, or drop the `localize`-derived function from the dep array with a lint-justified comment.

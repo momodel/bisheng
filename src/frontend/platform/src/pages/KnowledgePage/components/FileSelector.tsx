@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { FileIcon } from "@/components/bs-icons/file";
 import { truncateString } from "@/util/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@radix-ui/react-dropdown-menu';
@@ -178,7 +179,12 @@ export default function FileSelector({
                         console.log('Added selected file to the top of list');
                     }
                 }
-                onFileChange(String(selectedFile.value), selectedFile.fullData);
+                if (selectedFile) {
+                    onFileChange(String(selectedFile.value), selectedFile.fullData);
+                } else {
+                    setError(t('file.fileNotFound'));
+                    onFileChange(String(selectedFileId), null);
+                }
             }
 
         };

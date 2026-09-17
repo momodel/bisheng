@@ -1,11 +1,23 @@
 import logging
-from typing import Awaitable, Callable, List, Any
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from bisheng.channel.domain.repositories.interfaces.channel_repository import ChannelRepository
-from bisheng.common.models.space_channel_member import BusinessTypeEnum, MembershipStatusEnum
-from bisheng.common.repositories.interfaces.space_channel_member_repository import SpaceChannelMemberRepository
+from bisheng.channel.domain.repositories.interfaces.channel_repository import (
+    ChannelRepository,
+)
+from bisheng.common.models.space_channel_member import (
+    BusinessTypeEnum,
+    MembershipStatusEnum,
+)
+from bisheng.common.repositories.interfaces.space_channel_member_repository import (
+    SpaceChannelMemberRepository,
+)
 from bisheng.message.domain.models.inbox_message import InboxMessage
-from bisheng.message.domain.schemas.message_schema import UserContentItem, MessageContentItem, BusinessContentItem
+from bisheng.message.domain.schemas.message_schema import (
+    BusinessContentItem,
+    MessageContentItem,
+    UserContentItem,
+)
 from bisheng.message.domain.services.approval_handler import ApprovalHandler
 from bisheng.user.domain.models.user import UserDao
 
@@ -16,10 +28,13 @@ class ChannelSubscribeApprovalHandler(ApprovalHandler):
     """Handle channel subscription approval actions."""
 
     def __init__(
-            self,
-            space_channel_member_repository: SpaceChannelMemberRepository,
-            channel_repository: ChannelRepository,
-            notify_sender: Callable[[int, List[int], Any], Awaitable[InboxMessage]],
+        self,
+        space_channel_member_repository: SpaceChannelMemberRepository,
+        channel_repository: ChannelRepository,
+        notify_sender: Callable[
+            [int, list[int], Any],
+            Awaitable[InboxMessage],
+        ],
     ):
         self.space_channel_member_repository = space_channel_member_repository
         self.channel_repository = channel_repository
@@ -37,13 +52,18 @@ class ChannelSubscribeApprovalHandler(ApprovalHandler):
         if not membership:
             logger.warning(
                 "Pending channel membership not found when approving subscription: channel_id=%s, applicant_user_id=%s, message_id=%s",
-                channel_id, applicant_user_id, message.id,
+                channel_id,
+                applicant_user_id,
+                message.id,
             )
             return
         if membership.status != MembershipStatusEnum.PENDING:
             logger.warning(
                 "Channel membership is not pending when approving subscription: channel_id=%s, applicant_user_id=%s, message_id=%s, status=%s",
-                channel_id, applicant_user_id, message.id, membership.status,
+                channel_id,
+                applicant_user_id,
+                message.id,
+                membership.status,
             )
             return
         channel_info = await self.channel_repository.find_by_id(channel_id)
@@ -52,6 +72,17 @@ class ChannelSubscribeApprovalHandler(ApprovalHandler):
 
         membership.status = MembershipStatusEnum.ACTIVE
         await self.space_channel_member_repository.update(membership)
+        # Mirror the activated membership into an explicit ReBAC viewer grant so the
+        # member surfaces in the channel authorization list, matching direct subscribe.
+        from bisheng.channel.domain.services.channel_service import ChannelService
+
+        await ChannelService.sync_direct_channel_user_permissions(
+            channel_id,
+            membership.user_id,
+            membership.user_role,
+            is_active=True,
+            operator_user_id=operator_user_id,
+        )
         operator_user_info = await UserDao.aget_user(operator_user_id)
         await self.notify_sender(
             operator_user_id,
@@ -59,7 +90,9 @@ class ChannelSubscribeApprovalHandler(ApprovalHandler):
             [
                 UserContentItem(
                     user_id=operator_user_id,
-                    user_name=operator_user_info.user_name if operator_user_info else f"Unknown user {operator_user_id}",
+                    user_name=operator_user_info.user_name
+                    if operator_user_info
+                    else f"Unknown user {operator_user_id}",
                 ),
                 MessageContentItem(
                     type="system_text",
@@ -69,8 +102,8 @@ class ChannelSubscribeApprovalHandler(ApprovalHandler):
                     business_name=channel_info.name,
                     business_type="channel_id",
                     business_id=channel_info.id,
-                )
-            ]
+                ),
+            ],
         )
 
     async def on_rejected(self, message: InboxMessage, operator_user_id: int) -> None:
@@ -81,13 +114,18 @@ class ChannelSubscribeApprovalHandler(ApprovalHandler):
         if not membership or membership.id is None:
             logger.warning(
                 "Pending channel membership not found when rejecting subscription: channel_id=%s, applicant_user_id=%s, message_id=%s",
-                channel_id, applicant_user_id, message.id,
+                channel_id,
+                applicant_user_id,
+                message.id,
             )
             return
         if membership.status != MembershipStatusEnum.PENDING:
             logger.warning(
                 "Channel membership is not pending when rejecting subscription: channel_id=%s, applicant_user_id=%s, message_id=%s, status=%s",
-                channel_id, applicant_user_id, message.id, membership.status,
+                channel_id,
+                applicant_user_id,
+                message.id,
+                membership.status,
             )
             return
         channel_info = await self.channel_repository.find_by_id(channel_id)
@@ -105,7 +143,9 @@ class ChannelSubscribeApprovalHandler(ApprovalHandler):
             [
                 UserContentItem(
                     user_id=operator_user_id,
-                    user_name=operator_user_info.user_name if operator_user_info else f"Unknown user {operator_user_id}",
+                    user_name=operator_user_info.user_name
+                    if operator_user_info
+                    else f"Unknown user {operator_user_id}",
                 ),
                 MessageContentItem(
                     type="system_text",
@@ -115,14 +155,19 @@ class ChannelSubscribeApprovalHandler(ApprovalHandler):
                     business_name=channel_info.name,
                     business_type="channel_id",
                     business_id=channel_info.id,
-                )
-            ]
+                ),
+            ],
         )
 
     async def _get_membership(self, channel_id: str, applicant_user_id: int):
-        """Load the applicant membership for the target channel."""
+        """Load the applicant membership for the target channel.
+
+        Includes inactive rows: the applicant's membership is PENDING while awaiting
+        approval, and this handler must find it to flip it to ACTIVE/REJECTED.
+        """
         return await self.space_channel_member_repository.find_membership(
             business_id=channel_id,
             business_type=BusinessTypeEnum.CHANNEL,
             user_id=applicant_user_id,
+            include_inactive=True,
         )

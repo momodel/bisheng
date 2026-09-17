@@ -1,6 +1,33 @@
+// @ts-strict-ignore
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { generateUUID } from '~/utils';
+import { extractDroppedDirectories, readFolderFilesRecursive } from '~/utils/folderUpload';
 
-export const useFileDropAndPaste = ({ enabled, onFilesReceived }) => {
+// Clipboard screenshots always arrive as an image File named "image.png" (or
+// with an empty name). InputFiles dedups by file name, so pasting a second
+// screenshot collides on that name and gets dropped as a duplicate. Give
+// generically-named pasted images a unique name so each paste is kept and can
+// be addressed / previewed independently. Real named files (e.g. copied from
+// Finder) keep their name.
+const GENERIC_IMAGE_NAME = /^(image|screenshot|clipboard)?\.(png|jpe?g|gif|webp|bmp)$/i;
+const uniquifyPastedFile = (file: File): File => {
+    if (!file.type?.startsWith('image/')) return file;
+    if (file.name && !GENERIC_IMAGE_NAME.test(file.name)) return file;
+    const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    const uniqueName = `image-${generateUUID(8)}.${ext}`;
+    try {
+        return new File([file], uniqueName, { type: file.type, lastModified: file.lastModified });
+    } catch {
+        return file;
+    }
+};
+
+/**
+ * @param allowFolders  Accept dropped DIRECTORIES, expanded recursively with the
+ *   folder tree preserved on each File's `webkitRelativePath`. Task mode only:
+ *   daily chat has no workspace to rebuild a tree in.
+ */
+export const useFileDropAndPaste = ({ enabled, onFilesReceived, allowFolders = false }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragCounter = useRef(0);
 
@@ -38,6 +65,19 @@ export const useFileDropAndPaste = ({ enabled, onFilesReceived }) => {
             setIsDragging(false);
             dragCounter.current = 0;
 
+            // Directories must be pulled off the DataTransferItemList
+            // synchronously — it is invalidated the moment this handler returns.
+            // `dataTransfer.files` does not surface a dropped folder's contents at
+            // all, so without this a dropped folder silently did nothing.
+            const dirEntries = allowFolders ? extractDroppedDirectories(e.dataTransfer) : [];
+            if (dirEntries.length > 0) {
+                void Promise.all(dirEntries.map((dir) => readFolderFilesRecursive(dir, ''))).then((groups) => {
+                    const files = groups.flat();
+                    if (files.length > 0) onFilesReceived(files);
+                });
+                return;
+            }
+
             if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
                 onFilesReceived(e.dataTransfer.files);
                 e.dataTransfer.clearData();
@@ -55,7 +95,7 @@ export const useFileDropAndPaste = ({ enabled, onFilesReceived }) => {
             window.removeEventListener('dragover', handleDragOver);
             window.removeEventListener('drop', handleDrop);
         };
-    }, [enabled, onFilesReceived]);
+    }, [enabled, onFilesReceived, allowFolders]);
 
     // 2. pasete
     const handlePaste = useCallback((e) => {
@@ -67,7 +107,7 @@ export const useFileDropAndPaste = ({ enabled, onFilesReceived }) => {
             for (let i = 0; i < items.length; i++) {
                 if (items[i].kind === 'file') {
                     const file = items[i].getAsFile();
-                    if (file) files.push(file);
+                    if (file) files.push(uniquifyPastedFile(file));
                 }
             }
         }

@@ -1,5 +1,8 @@
+// @ts-strict-ignore
 import { LoadIcon } from "@/components/bs-icons";
 import { LoadingIcon } from "@/components/bs-icons/loading";
+import { PermissionDialog } from "@/components/bs-comp/permission/PermissionDialog";
+import { hasResourceAction, useLazyResourceActions } from "@/components/bs-comp/permission/useResourceActions";
 import { Accordion } from "@/components/bs-ui/accordion";
 import { Button } from "@/components/bs-ui/button";
 import { SearchInput } from "@/components/bs-ui/input";
@@ -9,7 +12,7 @@ import { refreshMcpApi } from "@/controllers/API/assistant";
 import { getToolsApi } from "@/controllers/API/tools";
 import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
 import { CpuIcon, Star, User } from "lucide-react";
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import McpServerDialog from "./EditMcp";
@@ -42,14 +45,28 @@ const TabTools = ({ select = null, onSelect }: TabToolsProps) => {
     useToolType(setType)
     const [loading, setLoading] = useState(false)
 
+    // Permission management state
+    const [permDialogOpen, setPermDialogOpen] = useState(false);
+    const [permTarget, setPermTarget] = useState<{ id: string; name: string } | null>(null);
+    const isBuiltinTool = type === "";
+    const { actions, load: loadToolActions } = useLazyResourceActions('tool', ['edit', 'delete', 'manage_permission']);
+    // Built-in tools expose no resource-level management actions. Their separate
+    // configuration entry is restricted to the global super admin below.
+    const canManageTool = (id: string | number) =>
+        !isBuiltinTool && hasResourceAction(actions, id, 'manage_permission');
+    const handleHoverToolPermissions = useCallback((tool) => {
+        if (isBuiltinTool || !tool?.id) return;
+        void loadToolActions(String(tool.id));
+    }, [isBuiltinTool, loadToolActions]);
+
     const loadData = async (_type = "custom") => {
-        await getToolsApi(_type).then((res) => {
+        await getToolsApi(_type, { action: 'visible' }).then((res) => {
             setAllData(res);
         });
         setLoading(false)
     };
     const loadMcpData = async () => {
-        await getToolsApi('mcp').then((res) => {
+        await getToolsApi('mcp', { action: 'visible' }).then((res) => {
             setAllData(res);
         });
         setLoading(false)
@@ -72,11 +89,17 @@ const TabTools = ({ select = null, onSelect }: TabToolsProps) => {
                 return el.name + el.desc + param
             }).join("-") || ''}`
             return targetStr.toLowerCase().includes(keyword.trim().toLowerCase());
-        });
-    }, [keyword, type, allData]);
+        }).map((el) => ({
+            ...el,
+            write: isBuiltinTool
+                ? Boolean(user?.is_global_super)
+                : hasResourceAction(actions, el.id, 'edit'),
+            delete: !isBuiltinTool && hasResourceAction(actions, el.id, 'delete'),
+        }));
+    }, [actions, allData, isBuiltinTool, keyword, type, user?.is_global_super]);
 
     const hasSet = (name) => {
-        if (user.role !== 'admin') return false
+        if (!user?.is_global_super) return false
         return MANAGED_TOOLS.includes(name)
     }
 
@@ -118,10 +141,13 @@ const TabTools = ({ select = null, onSelect }: TabToolsProps) => {
                             <span>{t("tools.mcpTools")}</span>
                         </div>
                     </div>
-                    <div className="absolute bottom-0 left-0 flex h-16 w-full items-center justify-betwee px-2">
-                        <p className="text-sm text-muted-foreground break-all">
-                            {t("tools.manageCustomTools")}
-                        </p>
+                    <div className="absolute bottom-0 left-0 flex h-16 w-full items-center justify-between px-6">
+                        <div className="flex items-center gap-2">
+                            <p className="text-sm text-muted-foreground break-keep">
+                                {t("tools.manageCustomTools")}
+                            </p>
+                            {/* F027 AC-12: "总记录数" badge removed from the tool list UI; backend response shape unchanged. */}
+                        </div>
                     </div>
                 </div>
                 <div className="h-full w-full flex-1 overflow-auto bg-background-login p-5 pb-20 pt-2 scrollbar-hide">
@@ -173,6 +199,10 @@ const TabTools = ({ select = null, onSelect }: TabToolsProps) => {
                                             type === 'mcp' ? mcpDialogRef.current.open(el) :
                                                 editRef.current.edit(el)
                                         }}
+                                        onPermission={canManageTool(el.id)
+                                            ? (tool) => { setPermTarget({ id: String(tool.id), name: tool.name }); setPermDialogOpen(true); }
+                                            : null}
+                                        onHoverPermissions={handleHoverToolPermissions}
                                     ></ToolItem>
                                 ))
                             ) : (
@@ -201,6 +231,17 @@ const TabTools = ({ select = null, onSelect }: TabToolsProps) => {
             />
 
             <ToolSet ref={toolsetRef} onChange={() => loadData("default")} />
+
+            {/* Permission management dialog */}
+            {permTarget && (
+                <PermissionDialog
+                    open={permDialogOpen}
+                    onOpenChange={setPermDialogOpen}
+                    resourceType="tool"
+                    resourceId={permTarget.id}
+                    resourceName={permTarget.name}
+                />
+            )}
         </div>
     );
 }

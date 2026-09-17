@@ -23,6 +23,9 @@ knowledges: # 知识库相关配置
       x-api-key: "11"
     request_kwargs:
       useChartRecognition: false
+  version_management:
+    enabled: false
+    simhash_similarity_threshold: 0.85
 
 llm_request:
   # 控制技能 LLM 组件模型访问的超时配置, 以下是默认值
@@ -69,19 +72,62 @@ env:
   enable_registration: false
   # 前端上传文件的最大限制，单位MB
   uploaded_files_maximum_size: 50
+  # 知识库/知识空间音视频上传最大限制，单位MB（其余文件仍用 uploaded_files_maximum_size）
+  uploaded_media_maximum_size: 1024
+  # 是否开启音视频上传（工作流 / 工作台 / 知识库统一开关，默认关闭）
+  enable_media_upload: false
+  # 工作台「无菜单权限」占位页（/menu-unavailable）展示的纯文案，可在系统配置中修改；不配置则使用前端默认文案
+  workbench_menu_unavailable_message: "暂无使用过的应用，可以前往应用广场探索更多应用"
 
 workflow:
   # 节点运行最大步数
   max_steps: 50
   # 等待用户输入的超时时间，单位分钟
   timeout: 5
+  # 首次打开已结束的独立工作流会话时是否自动重新运行（全局开关，默认关闭）
+  auto_rerun_on_open: false
+
+# 日常聊天（Agent 模式）相关配置
+daily_chat:
+  # Agent function-calling 循环最大迭代次数（LangGraph recursion_limit）。
+  # 默认 50；配置缺失 / 类型错误 / <= 0 时也使用 50。
+  agent_max_iterations: 50
+  # 送入模型的历史消息合计 token 上限；超出会从最旧一条开始丢弃，直到总量不超过。
+  # 需要按目标模型的 context window 调整：
+  #   - 200k 长上下文模型（GPT-5.1 / Claude 4.x）：可放大到 20000~30000
+  #   - 32k context 模型（GPT-4 Turbo 等）：建议 6000~10000
+  #   - 8k context 小模型：建议 2000~4000
+  # 默认 8000；配置缺失 / 类型错误 / <= 0 时也使用 8000。
+  history_max_tokens: 8000
 
 # 灵思模块相关配置
 linsight:
   # 历史记录中工具消息的最大token，超过后需要总结下历史记录
   tool_buffer: 100000
-  # 单个任务最大执行步骤数，防止死循环
-  max_steps: 200
+  # 单个任务最大执行步骤数（LangGraph recursion_limit），防止死循环。
+  # ⚠️ 这里的“步骤”是 LangGraph super-step，不是模型轮次：一轮模型调用约消耗 4 个 super-step
+  #   （model → 工具循环熔断器 after_model → TodoList after_model → tools）。
+  #   另外「只产出 write_todos」的空转轮会退还预算（每个预算桶最多退 10 轮），
+  #   所以实际模型调用可能超过 max_model_turns，保险丝要留出这部分余量：
+  #   (600 + 10) × 4 + 20 = 2460，取 2500 留头。
+  #   它是跑飞时的保险丝，真正的业务上限请调 max_model_turns。
+  #   若本值低于所需，后端会自动抬高并打 warning 日志。
+  max_steps: 2500
+  # 主图轮次预算：一次任务运行最多允许多少次模型调用，到顶前会提示模型收尾（软着陆）。
+  # ask_user 打断恢复后重新计数（中间件随 agent 重建）。
+  # 115 对真实的投标类任务远远不够：一次「9 份 PDF / 833 页 / 109 项参数逐项提取」的
+  # 任务在 115 轮处只走完计划的前 3 步（页级索引与项目结构核实），一项参数都没提取就
+  # 被迫收尾；而同类任务的工作量还会再翻一倍，故按最重的场景给到 600。
+  # ⚠️ 代价是跑飞时烧得更久（最坏约 2460 个 super-step）：超大任务仍建议拆成多次，
+  #    单次任务还受 checkpoint 写放大与上下文长度制约，堆高预算先撞到的往往是这两个。
+  max_model_turns: 600
+  # 子代理（researcher）轮次预算。⚠️ 按「每次 task 调用」独立计数，不是整次任务共享：
+  # 主图并行委派 2 个子代理时，每个各得完整一份，互不抢额度。
+  # 120：逐项提取/交叉校验这类重活由子代理承担，30 轮往往只够读完材料；与主图同比例放宽。
+  max_model_turns_subagent: 120
+  # 距离预算耗尽还剩多少轮时开始提示模型收尾；最后 2 轮只保留写文件/导出工具，
+  # 归零时不再提供任何工具，模型只能输出文本，图正常结束
+  soft_landing_turns: 8
   # 灵思任务执行过程中模型调用重试次数
   retry_num: 3
   # 灵思任务执行过程中模型调用重试间隔时间（秒）
@@ -107,3 +153,8 @@ information_conf:
 
 mcp:
   enable_stdio: true
+
+knowledge_space:
+  # 知识空间左侧目录树展示开关（仅前端读取，后端 API 不变）
+  # 默认 true；中粮场内部署改为 false 走原 Tab 布局
+  tree_structured_directory_display: true

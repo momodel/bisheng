@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocalize } from "~/hooks";
+import { ARTIFACT_SANDBOX, buildSandboxedSrcDoc } from "~/utils/sandboxedHtml";
+import { resolveKnowledgePreviewUrl } from "../previewUrlUtils";
 
 interface HtmlViewerProps {
     fileUrl: string;
@@ -16,7 +18,7 @@ export function HtmlViewer({ fileUrl, zoomLevel }: HtmlViewerProps) {
         const fetchHtml = async () => {
             try {
                 setLoading(true);
-                const response = await fetch(fileUrl);
+                const response = await fetch(resolveKnowledgePreviewUrl(fileUrl));
                 if (!response.ok) throw new Error(localize("com_knowledge.failure_status", { 0: response.status }));
                 const text = await response.text();
                 setHtmlContent(text);
@@ -32,7 +34,7 @@ export function HtmlViewer({ fileUrl, zoomLevel }: HtmlViewerProps) {
 
     if (loading) {
         return (
-            <div className="flex-1 flex items-center justify-center text-[#86909c]">
+            <div className="flex-1 flex items-center justify-center text-text-3">
                 {localize("com_knowledge.loading")}</div>
         );
     }
@@ -40,7 +42,7 @@ export function HtmlViewer({ fileUrl, zoomLevel }: HtmlViewerProps) {
     if (error) {
         return (
             <div className="flex-1 flex items-center justify-center">
-                <div className="flex flex-col items-center gap-3 text-[#86909c]">
+                <div className="flex flex-col items-center gap-3 text-text-3">
                     <div className="text-4xl">🌐</div>
                     <p>{error}</p>
                 </div>
@@ -51,12 +53,14 @@ export function HtmlViewer({ fileUrl, zoomLevel }: HtmlViewerProps) {
     const scale = zoomLevel / 100;
 
     return (
-        <div className="flex-1 overflow-auto bg-[#fbfbfb]">
+        <div className="scrollbar-os flex-1 overflow-auto bg-[#fbfbfb]">
             <div className="w-full h-full">
                 <iframe
-                    srcDoc={htmlContent || ""}
+                    srcDoc={buildSandboxedSrcDoc(htmlContent || "")}
                     title={localize("com_knowledge.html_preview")}
-                    sandbox="allow-same-origin"
+                    // Was `allow-same-origin` with no `allow-scripts`: exactly inverted —
+                    // the page's own scripts never ran, yet it inherited this app's origin.
+                    sandbox={ARTIFACT_SANDBOX}
                     className="w-full h-full border-none bg-white"
                     style={{
                         transform: `scale(${scale})`,

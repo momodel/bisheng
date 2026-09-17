@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { TitleIconBg } from "@/components/bs-comp/cardComponent";
 import { SettingIcon } from "@/components/bs-icons/setting";
 import { ToolIcon } from "@/components/bs-icons/tool";
@@ -9,7 +10,7 @@ import {
 import { Badge } from "@/components/bs-ui/badge";
 import { Button } from "@/components/bs-ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/bs-ui/tooltip";
-import { CircleHelp } from "lucide-react";
+import { CircleHelp, Shield } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -19,7 +20,10 @@ export default function ToolItem({
     data,
     onEdit = (id) => { },
     onSelect,
-    onSetClick = null
+    onSetClick = null,
+    onPermission = null,
+    onHoverPermissions = null,
+    permissionBadge = null,
 }) {
     const { t } = useTranslation('tool');
     const sortData = useMemo(() => {
@@ -32,13 +36,23 @@ export default function ToolItem({
 
     return <AccordionItem key={data.id} value={data.id} className="data-[state=open]:border-2 data-[state=open]:border-primary/20 data-[state=open]:rounded-md">
         <AccordionTrigger className="min-w-0">
-            <div className="group flex gap-2 text-start relative pr-4 min-w-0">
+            <div
+                className="group flex gap-2 text-start relative pr-4 min-w-0"
+                onMouseEnter={() => onHoverPermissions?.(data)}
+            >
                 <TitleIconBg className="w-8 h-8 min-w-8" id={data.id} ><ToolIcon /></TitleIconBg>
                 <div className="flex-1 min-w-0">
                     <div className="w-full text-sm font-medium leading-none flex items-center gap-2 min-w-0">
                         <span className="truncate">
                             {type ? data.name : t(`categories.${data.name}.name`)}
                         </span>
+                        {permissionBadge}
+                        {
+                            onPermission && <div
+                                className="group-hover:opacity-100 opacity-0 hover:bg-[#EAEDF3] dark:hover:bg-[#34353A] rounded cursor-pointer p-1"
+                                onClick={(e) => { e.stopPropagation(); onPermission(data) }}
+                            ><Shield className="w-4 h-4" /></div>
+                        }
                         {
                             ['edit', 'mcp'].includes(type) && data.write && <div
                                 className="group-hover:opacity-100 opacity-0 hover:bg-[#EAEDF3] rounded cursor-pointer"

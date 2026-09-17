@@ -1,5 +1,7 @@
+// @ts-strict-ignore
 "use client"
 
+import { PermissionDialog } from "@/components/bs-comp/permission/PermissionDialog"
 import { bsConfirm } from "@/components/bs-ui/alertDialog/useConfirm"
 import { Button } from "@/components/bs-ui/button"
 import { SearchInput } from "@/components/bs-ui/input"
@@ -46,14 +48,18 @@ export function DashboardSidebar({
 
     const [searchQuery, setSearchQuery] = useState("")
     const { user } = useContext(userContext);
-
+    // Permission management state
+    const [permDialogOpen, setPermDialogOpen] = useState(false);
+    const [permTarget, setPermTarget] = useState<{ id: string; name: string } | null>(null);
     const canCreate = useMemo(() => {
         return user.web_menu?.includes('create_dashboard') || user.role === 'admin'
     }, [user])
 
+    // Visibility is already decided by the server list; the sidebar only narrows
+    // it by the search box. Per-row edit/delete/manage permissions are resolved
+    // lazily inside each item the moment the user reaches for them.
     const filteredDashboards = useMemo(() => {
         if (!searchQuery.trim()) return dashboards
-
         return dashboards.filter((dashboard) => dashboard.title.toLowerCase().includes(searchQuery.toLowerCase()))
     }, [dashboards, searchQuery])
 
@@ -210,7 +216,7 @@ export function DashboardSidebar({
                         />
                     </div>
 
-                    <div className="overflow-y-auto space-y-2 h-[calc(100vh-174px)]">
+                    <div className="overflow-y-auto space-y-2 h-[calc(100vh-174px-var(--license-banner-h,0px))]">
                         {filteredDashboards.length === 0 ? (
                             <div className="text-center text-muted-foreground text-sm py-8">
                                 {searchQuery ? t('noMatchingDashboards') : t('noDashboards')}
@@ -227,12 +233,23 @@ export function DashboardSidebar({
                                     onDefault={onDefault}
                                     onShare={onShare}
                                     onDelete={handleDelete}
+                                    onPermission={(d) => { setPermTarget({ id: String(d.id), name: d.title }); setPermDialogOpen(true); }}
                                 />
                             ))
                         )}
                     </div>
                 </div>
             )}
+        {/* Permission management dialog */}
+        {permTarget && (
+            <PermissionDialog
+                open={permDialogOpen}
+                onOpenChange={setPermDialogOpen}
+                resourceType="dashboard"
+                resourceId={permTarget.id}
+                resourceName={permTarget.name}
+            />
+        )}
         </div>
     )
 }

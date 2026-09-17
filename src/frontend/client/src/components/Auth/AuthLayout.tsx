@@ -65,12 +65,12 @@ function AuthLayout({
           <img
             src="/assets/sg-logo.png"
             className="h-full w-full object-contain"
-            alt={localize('com_ui_logo', { 0: startupConfig?.appTitle ?? 'Deepseek' })}
+            alt={localize('com_ui_logo', { 0: startupConfig?.appTitle ?? 'BISHENG' })}
           />
         </div>
       </BlinkAnimation>
       <DisplayError />
-      <div className="absolute bottom-0 left-0 md:m-4">
+      <div className="absolute bottom-0 left-0 touch-desktop:m-4">
         <ThemeSelector />
       </div>
 

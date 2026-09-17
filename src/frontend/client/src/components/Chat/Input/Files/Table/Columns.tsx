@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 
 import { ArrowUpDown, Database } from 'lucide-react';
 import { FileSources, FileContext } from '~/types/chat';
@@ -7,7 +8,7 @@ import { Button, Checkbox, OpenAIMinimalIcon, AzureMinimalIcon } from '~/compone
 import ImagePreview from '~/components/Chat/Input/Files/ImagePreview';
 import FilePreview from '~/components/Chat/Input/Files/FilePreview';
 import { SortFilterHeader } from './SortFilterHeader';
-import { TranslationKeys, useLocalize, useMediaQuery } from '~/hooks';
+import { TranslationKeys, useLocalize, usePrefersMobileLayout } from '~/hooks';
 import { formatDate, getFileType } from '~/utils';
 
 const contextMap: Record<any, TranslationKeys> = {
@@ -106,7 +107,7 @@ export const columns: ColumnDef<TFile>[] = [
       );
     },
     cell: ({ row }) => {
-      const isSmallScreen = useMediaQuery('(max-width: 768px)');
+      const isSmallScreen = usePrefersMobileLayout();
       return formatDate(row.original.updatedAt?.toString() ?? '', isSmallScreen);
     },
   },

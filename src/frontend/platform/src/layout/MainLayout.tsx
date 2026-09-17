@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import {
     ApplicationIcon,
     BookOpenIcon,
@@ -19,6 +20,8 @@ import { SelectHover, SelectHoverItem } from "@/components/bs-ui/select/hover";
 import { locationContext } from "@/contexts/locationContext";
 import i18next from "i18next";
 import { Check, ChevronDown, GanttChartIcon, Lock, MoonStar, Sun } from "lucide-react";
+import { ApprovalMenuIcon } from "@/components/bs-icons/menu/approval";
+import { TenantMenuIcon } from "@/components/bs-icons/menu/tenant";
 import { Suspense, useContext, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
@@ -29,7 +32,10 @@ import { userContext } from "../contexts/userContext";
 import { logoutApi } from "../controllers/API/user";
 import { captureAndAlertRequestErrorHoc } from "../controllers/request";
 import { User } from "../types/api/user";
+import { getBrandAssetUrl } from "../utils/brand";
+import { getWorkspaceClientUrl } from "../utils/workspaceUrl";
 import HeaderMenu from "./HeaderMenu";
+import { LicenseBanner } from "./LicenseBanner";
 
 export default function MainLayout() {
     const { dark, setDark } = useContext(darkContext);
@@ -45,8 +51,13 @@ export default function MainLayout() {
             okTxt: t('system.confirm'),
             onOk(next) {
                 captureAndAlertRequestErrorHoc(logoutApi()).then(_ => {
-                    setUser(null)
+                    const thirdPartyLogoutUrl = localStorage.getItem('THIRD_PARTY_LOGOUT_URL')
                     localStorage.removeItem('isLogin')
+                    if (thirdPartyLogoutUrl) {
+                        window.location.href = thirdPartyLogoutUrl
+                    } else {
+                        setUser(null)
+                    }
                 })
                 next()
             }
@@ -56,24 +67,62 @@ export default function MainLayout() {
     // 重置密码
     const navigator = useNavigate()
     const JumpResetPage = () => {
-        localStorage.setItem('account', user.user_name)
+        localStorage.setItem('account', user.external_id || user.user_name)
         navigator('/reset')
     }
 
-    // 系统管理员(超管、组超管)
-    const isAdmin = useMemo(() => {
-        return ['admin', 'group_admin'].includes(user.role)
-    }, [user])
+    // Global super admins and Child Admins bypass business-menu checks.
+    // Department admins receive only the system entry by identity.
+    const isSuperAdmin = useMemo(() => user.role === "admin", [user])
+    const isDeptAdmin = Boolean(user.is_department_admin)
+    const isChildAdmin = Boolean(user.is_child_admin)
+    const canManageWorkbenchConfig = isSuperAdmin || isChildAdmin
+    const showSystemNav = isSuperAdmin || isDeptAdmin || isChildAdmin
+    // 审批管理 — 仅超管 / Child Admin（部门管理员不可见）
+    const showApprovalNav = isSuperAdmin || isChildAdmin
+    // Admin-area approval scope (falls back to the legacy global flag for
+    // roles saved before the workbench/admin split).
+    const menuApprovalMode = Boolean(user.menu_approval_mode_admin ?? user.menu_approval_mode)
+    const hasAdminEntry =
+        isSuperAdmin
+        || isDeptAdmin
+        || isChildAdmin
+        || Boolean(user.web_menu?.includes("admin") || user.web_menu?.includes("backend"))
 
-    const isMenu = (menu) => {
-        return user.web_menu.includes(menu) || user.role === 'admin'
+    const isMenu = (menu: string) => {
+        if (menu === 'workstation') {
+            return user.web_menu?.includes('workstation')
+                || user.web_menu?.includes('frontend')
+                || canManageWorkbenchConfig
+        }
+        return user.web_menu?.includes(menu) || isSuperAdmin || isChildAdmin
     }
 
+    const u = user as User
+    const hasWorkbenchEntry =
+        u.has_workbench
+        ?? (isMenu('workstation'))
+    const showAccountMenu = false
+    const showMobileNotice = false
+
+    // Admin-console menus that can be applied for via the approval system.
+    // Mirrors MENU_KEY_VALUES in ApprovalPage (top-level admin menus only).
+    const APPROVAL_MENUS = new Set(['board', 'build', 'knowledge', 'model', 'evaluation', 'mark_task', 'log'])
+
+    /** Show if user has permission OR if the menu supports approval requests */
+    const showAdminNav = (menu: string) =>
+        isMenu(menu) || (menuApprovalMode && hasAdminEntry && APPROVAL_MENUS.has(menu))
+
     return <div className="flex">
-        <div className="bg-background-main w-full h-screen">
-            <div className="flex justify-between h-[64px] bg-background-main relative z-[21] whitespace-nowrap">
+        <div className="bg-background-main w-full h-screen flex flex-col">
+            {isSuperAdmin && <LicenseBanner />}
+            <div className="flex justify-between h-[64px] shrink-0 bg-background-main relative z-[21] whitespace-nowrap">
                 <div className="flex h-9 my-[14px] shrink-0">
-                 <img src={__APP_ENV__.BASE_URL + '/assets/bisheng/login-logo-small.png'} className="w-[48px] h-[24px] ml-[38px] rounded" alt="" />
+                    <div className="inline-block" >
+                        {/* @ts-ignore */}
+                        <img src={getBrandAssetUrl('headerLogoLight', '/assets/bisheng/login-logo-small.png')} className="w-[48px] h-[24px] ml-[38px] rounded dark:hidden" alt="" />
+                        <img src={getBrandAssetUrl('headerLogoDark', '/assets/bisheng/logo-small-dark.png')} className="w-[48px] h-[24px] ml-[38px] rounded hidden dark:block" alt="" />
+                    </div>
                 </div>
                 <div>
                     <HeaderMenu />
@@ -112,93 +161,107 @@ export default function MainLayout() {
                         </SelectHover>
                         <Separator className="mx-[23px] h-6 border-l my-5 border-[#dddddd]" orientation="vertical" />
                     </div>
-                    {/* <div className="flex items-center h-7 my-4">
-                        <img className="h-7 w-7 rounded-2xl mr-4" src={__APP_ENV__.BASE_URL + '/assets/user.png'} alt="" />
+                    {showAccountMenu && <div className="flex items-center h-7 my-4">
+                        {/* @ts-ignore */}
+                        <img className="h-7 w-7 rounded-2xl mr-4" src={__APP_ENV__.BASE_URL + (user.avatar || '/assets/user.png')} alt="" />
                         <SelectHover
                             triagger={
                                 <span className="leading-8 text-[14px] mr-8 max-w-40 cursor-pointer text-ellipsis overflow-hidden whitespace-nowrap">
                                     {user.user_name} <ChevronDown className="inline-block mt-[-2px]" />
                                 </span>
                             }>
-                            {isMenu('frontend') && <SelectHoverItem onClick={() => window.open('/workspace/')}><GanttChartIcon className="w-4 h-4 mr-1" /><span>{t('menu.workspace')}</span></SelectHoverItem>}
+                            {hasWorkbenchEntry && <SelectHoverItem onClick={() => window.open('/workspace/')}><GanttChartIcon className="w-4 h-4 mr-1" /><span>{t('menu.workspace')}</span></SelectHoverItem>}
                             <SelectHoverItem onClick={JumpResetPage}><Lock className="w-4 h-4 mr-1" /><span>{t('menu.changePwd')}</span></SelectHoverItem>
-                            <SelectHoverItem onClick={handleLogout}><QuitIcon className="w-4 h-4 mr-1" /><span>{t('menu.logout')}</span></SelectHoverItem>
+                            <SelectHoverItem onClick={handleLogout} className="text-[#f53f3f] hover:bg-red-50 dark:hover:bg-red-950/30 dark:text-[#f53f3f]"><QuitIcon className="w-4 h-4 mr-1" /><span>{t('menu.logout')}</span></SelectHoverItem>
                         </SelectHover>
-                    </div> */}
+                    </div>}
                 </div>
             </div>
-            <div className="flex" style={{ height: "calc(100vh - 64px)" }}>
+            <div className="flex flex-1 min-h-0">
                 <div className="relative z-10 bg-background-main h-full w-[184px] min-w-[184px] px-3  shadow-x1 flex justify-between text-center ">
-                    <nav className="">
-                        {appConfig.benchMenu && isMenu('frontend') && (
-                            <a
-                                href={`${(__APP_ENV__.BASE_URL === '/' ? '' : __APP_ENV__.BASE_URL) + '/workspace/'}`}  // 直接使用根路径
-                                target="_blank"
-                                className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}
+                    <nav className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: "calc(100vh - 64px - 90px - var(--license-banner-h, 0px))" }}>
+                        {(appConfig.benchMenu ?? true) && hasWorkbenchEntry && (
+                            <button
+                                type="button"
+                                onClick={() => window.open(getWorkspaceClientUrl('/'))}
+                                className="navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]"
                             >
                                 <ApplicationIcon className="h-6 w-6 my-[12px]" />
                                 <span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px] whitespace-nowrap">
                                     {t('menu.workspace')}
                                 </span>
-                            </a>
+                            </button>
                         )}
                         {/* <NavLink to='/' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
                             <ApplicationIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px]">{t('menu.app')}</span>
                         </NavLink> */}
                         {
-                            isMenu('board') && <>
-                                <NavLink to='/dashboard ' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                            showAdminNav('board') && <>
+                                <NavLink to={isMenu('board') ? '/dashboard' : '/menu-pending?menu=board'} className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
                                     <DashboardIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px]">{t('menu.dashboard')}</span>
                                 </NavLink>
                             </>
                         }
                         {
-                            isMenu('build') &&
-                            <NavLink to='/build' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`} >
+                            (showAdminNav('build') || canManageWorkbenchConfig) &&
+                            <NavLink to={isMenu('build') ? '/build' : (canManageWorkbenchConfig ? '/build/client' : '/menu-pending?menu=build')} className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`} >
                                 <TechnologyIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px]">{t('menu.skills')}</span>
                             </NavLink>
                         }
                         {
-                            isMenu('knowledge') &&
-                            <NavLink to='/filelib' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                            showAdminNav('knowledge') &&
+                            <NavLink to={isMenu('knowledge') ? '/filelib' : '/menu-pending?menu=knowledge'} className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
                                 <KnowledgeIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px]">{t('menu.knowledge')}</span>
                             </NavLink>
                         }
                         {
-                            user.role === 'admin' && <>
+                            isMenu('dataset') && <>
                                 <NavLink to='/dataset' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
                                     <DatasetIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px]">{t('menu.dataset')}</span>
                                 </NavLink>
                             </>
                         }
                         {
-                            isMenu('model') &&
-                            <NavLink to='/model' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                            showAdminNav('model') &&
+                            <NavLink to={isMenu('model') ? '/model' : '/menu-pending?menu=model'} className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
                                 <ModelIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px]">{t('menu.models')}</span>
                             </NavLink>
                         }
                         {
-                            isMenu('evaluation') &&
-                            <NavLink to='/evaluation' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                            showAdminNav('evaluation') &&
+                            <NavLink to={isMenu('evaluation') ? '/evaluation' : '/menu-pending?menu=evaluation'} className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
                                 <EvaluatingIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px]">{t('menu.evaluation')}</span>
                             </NavLink>
                         }
                         {
-                            <NavLink to='/label' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                            showAdminNav('mark_task') &&
+                            <NavLink to={isMenu('mark_task') ? '/label' : '/menu-pending?menu=mark_task'} className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
                                 <LabelIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[48px] text-[14px] leading-[48px]">{t('menu.annotation')}</span>
                             </NavLink>
                         }
                         {
-                            isAdmin && <>
-                                <NavLink to='/log' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
-                                    <LogIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[56px] text-[14px] leading-[48px]">{t('menu.log')}</span>
+                            showAdminNav('log') &&
+                            <NavLink to={isMenu('log') ? '/log' : '/menu-pending?menu=log'} className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                                <LogIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[56px] text-[14px] leading-[48px]">{t('menu.log')}</span>
+                            </NavLink>
+                        }
+                        {
+                            showApprovalNav &&
+                            <NavLink to='/approval' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                                <ApprovalMenuIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[56px] text-[14px] leading-[48px]">{t('menu.approval')}</span>
+                            </NavLink>
+                        }
+                        {
+                            showSystemNav && <>
+                                <NavLink to='/sys' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                                    <SystemIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[56px] text-[14px] leading-[48px]">{t('menu.system')}</span>
                                 </NavLink>
                             </>
                         }
                         {
-                            isAdmin && <>
-                                <NavLink to='/sys' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
-                                    <SystemIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[56px] text-[14px] leading-[48px]">{t('menu.system')}</span>
+                            isSuperAdmin && appConfig.multiTenantEnabled && <>
+                                <NavLink to='/tenant' className={`navlink inline-flex rounded-lg w-full px-6 hover:bg-nav-hover h-12 mb-[3.5px]`}>
+                                    <TenantMenuIcon className="h-6 w-6 my-[12px]" /><span className="mx-[14px] max-w-[56px] text-[14px] leading-[48px]">{t('tenant.management')}</span>
                                 </NavLink>
                             </>
                         }
@@ -231,7 +294,11 @@ export default function MainLayout() {
                         </div>
                     </div>}
                 </div>
-                <div className="flex-1 bg-background-main-content rounded-lg w-[calc(100vw-184px)]">
+                {/* Width comes from the flex row, not from 100vw: 100vw counts the
+                    document scrollbar, so calc(100vw-184px) overshot the free space
+                    by the scrollbar width and forced a horizontal document scrollbar
+                    (which then cost vertical space and produced a second, outer scrollbar). */}
+                <div className="flex-1 min-w-0 bg-background-main-content rounded-lg">
                     <Suspense fallback={<div className="flex items-center justify-center h-full"><LoadingIcon /></div>}>
                         <Outlet />
                     </Suspense>
@@ -240,7 +307,7 @@ export default function MainLayout() {
         </div>
 
         {/* // mobile */}
-        {/* <div className="fixed w-full h-full top-0 left-0 bg-[rgba(0,0,0,0.4)] sm:hidden text-sm z-50">
+        {showMobileNotice && <div className="fixed w-full h-full top-0 left-0 bg-[rgba(0,0,0,0.4)] sm:hidden text-sm z-50">
             <div className="w-10/12 bg-gray-50 mx-auto mt-[30%] rounded-xl px-4 py-10">
                 <p className=" text-sm text-center">{t('menu.forBestExperience')}</p>
                 {
@@ -254,16 +321,25 @@ export default function MainLayout() {
                     </div>
                 }
             </div>
-        </div> */}
+        </div>}
     </div >
 };
 
 const useLanguage = (user: User) => {
-    const [language, setLanguage] = useState('zh-Hans')
+    // APP_CONFIG.disableJa (config.js) hides Japanese from the switcher.
+    const jaDisabled = !!(window as any).APP_CONFIG?.disableJa
+    const options: Record<string, string> = jaDisabled
+        ? { "zh-Hans": '中文', "en-US": 'English' }
+        : { "zh-Hans": '中文', "en-US": 'English', ja: '日本語' }
+    // Source of truth for the displayed label is whatever i18next resolved
+    // during init (which already honors disableJa).
+    const initialLanguage = options[i18next.language] ? i18next.language : 'zh-Hans'
+    const [language, setLanguage] = useState(initialLanguage)
     useEffect(() => {
         const lang = user.user_id ? localStorage.getItem('i18nextLng') : null
         if (lang) {
-            setLanguage(lang === 'zh' ? 'zh-Hans' : lang)
+            const normalized = lang === 'zh' ? 'zh-Hans' : lang
+            setLanguage(options[normalized] ? normalized : initialLanguage)
         }
     }, [user])
 
@@ -278,8 +354,8 @@ const useLanguage = (user: User) => {
     }
     return {
         language,
-        languageNames: { "zh-Hans": '中文', "en-US": 'English', ja: '日本語' },
-        options: { "zh-Hans": '中文', "en-US": 'English', ja: '日本語' },
+        languageNames: options,
+        options,
         changLanguage,
         t
     }

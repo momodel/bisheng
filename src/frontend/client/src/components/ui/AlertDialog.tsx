@@ -24,7 +24,7 @@ const AlertDialogOverlay = React.forwardRef<
 >(({ className = '', ...props }, ref) => (
   <AlertDialogPrimitive.Overlay
     className={cn(
-      'fixed inset-0 z-[110] bg-gray-500/90 backdrop-blur-md transition-opacity animate-in fade-in dark:bg-gray-800/90',
+      'fixed inset-0 z-[110] bg-gray-500/90 transition-opacity animate-in fade-in dark:bg-gray-800/90',
       className,
     )}
     {...props}
@@ -42,7 +42,7 @@ const AlertDialogContent = React.forwardRef<
     <AlertDialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed z-[110] grid w-full max-w-lg scale-100 gap-4 bg-white p-6 opacity-100 animate-in fade-in-90 slide-in-from-bottom-10 sm:rounded-lg sm:zoom-in-90 sm:slide-in-from-bottom-0 md:w-full',
+        'alert-dialog fixed z-[110] grid w-full max-w-lg scale-100 gap-4 bg-white p-6 opacity-100 animate-in fade-in-90 slide-in-from-bottom-10 sm:rounded-lg sm:zoom-in-90 sm:slide-in-from-bottom-0 touch-desktop:w-full',
         'dark:bg-gray-900',
         className,
       )}

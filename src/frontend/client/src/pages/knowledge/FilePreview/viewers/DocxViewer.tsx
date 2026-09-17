@@ -1,6 +1,7 @@
 import * as mammoth from "mammoth";
 import { useEffect, useRef, useState } from "react";
 import { useLocalize } from "~/hooks";
+import { sanitizeHtml } from "~/utils/sanitizeHtml";
 
 interface DocxViewerProps {
     fileUrl: string;
@@ -35,7 +36,7 @@ export function DocxViewer({ fileUrl, zoomLevel }: DocxViewerProps) {
 
     if (loading) {
         return (
-            <div className="flex-1 flex items-center justify-center text-[#86909c]">
+            <div className="flex-1 flex items-center justify-center text-text-3">
                 {localize("com_knowledge.doc_loading")}</div>
         );
     }
@@ -43,7 +44,7 @@ export function DocxViewer({ fileUrl, zoomLevel }: DocxViewerProps) {
     if (error) {
         return (
             <div className="flex-1 flex items-center justify-center">
-                <div className="flex flex-col items-center gap-3 text-[#86909c]">
+                <div className="flex flex-col items-center gap-3 text-text-3">
                     <div className="text-4xl">📄</div>
                     <p>{error}</p>
                 </div>
@@ -54,11 +55,11 @@ export function DocxViewer({ fileUrl, zoomLevel }: DocxViewerProps) {
     const scale = zoomLevel / 100;
 
     return (
-        <div className="flex-1 overflow-auto bg-[#fbfbfb]">
-            <div className="flex justify-center py-6 px-4">
+        <div className="scrollbar-os min-w-0 flex-1 overflow-auto bg-[#fbfbfb]">
+            <div className="box-border flex w-full justify-center py-6 px-3 sm:px-4">
                 <div
                     ref={containerRef}
-                    className="bg-white shadow-md max-w-[800px] w-full rounded-sm"
+                    className="w-full max-w-[800px] rounded-sm bg-white shadow-md"
                     style={{
                         transform: `scale(${scale})`,
                         transformOrigin: "top center",
@@ -71,17 +72,33 @@ export function DocxViewer({ fileUrl, zoomLevel }: DocxViewerProps) {
                             padding: 40px 60px;
                             font-size: 14px;
                             color: #1d2129;
+                            /* Break long unbreakable tokens (URLs, ASCII art, no-space CJK runs)
+                               so they wrap inside the page width instead of overflowing right. */
+                            overflow-wrap: anywhere;
+                            word-break: break-word;
+                        }
+                        /* Mobile: shrink the side padding so narrow screens
+                           don't waste 120px on margins. Matches the 767px
+                           breakpoint used by usePrefersMobileLayout. */
+                        @media (max-width: 767px) {
+                            .docx-content {
+                                padding: 24px 16px;
+                            }
                         }
                         .docx-content p { margin: 0 0 1em 0; }
-                        .docx-content table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-                        .docx-content table td, .docx-content table th { border: 1px solid #ddd; padding: 8px 12px; }
+                        /* table-layout: fixed prevents wide columns from blowing
+                           out the frame; column widths from mammoth are honored
+                           via <col> if present, otherwise they share width equally. */
+                        .docx-content table { border-collapse: collapse; width: 100%; max-width: 100%; margin: 1em 0; table-layout: fixed; }
+                        .docx-content table td, .docx-content table th { border: 1px solid #ddd; padding: 8px 12px; overflow-wrap: break-word; word-break: break-word; }
                         .docx-content table th { background: #f7f8fa; font-weight: 600; }
                         .docx-content img { max-width: 100%; height: auto; }
+                        .docx-content pre, .docx-content code { white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; }
                         .docx-content h1, .docx-content h2, .docx-content h3 { color: #1d2129; margin: 1.5em 0 0.5em; }
                     `}</style>
                     <div
                         className="docx-content"
-                        dangerouslySetInnerHTML={{ __html: htmlContent }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(htmlContent) }}
                     />
                 </div>
             </div>

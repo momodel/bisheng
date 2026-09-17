@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useRecoilState, useRecoilValue } from "recoil";
 import { Button, SendIcon, Textarea } from "~/components";
@@ -21,7 +22,7 @@ export default function ChatInput({ readOnly, v }) {
     const [audioOpening] = useRecordingAudioLoading();
     const localize = useLocalize();
     const { data: modelData } = useGetWorkbenchModelsQuery();
-    const showVoice = modelData?.asr_model.id;
+    const showVoice = modelData?.asr_model?.id;
 
     const inputFilesRef = useRef(null);
 
@@ -36,7 +37,7 @@ export default function ChatInput({ readOnly, v }) {
     // ... Placeholder 和 AutoFocus 逻辑保持不变 ...
     const placholder = useMemo(() => {
         return inputDisabled ?
-            (inputMsg.code ? localize(`api_errors.${inputMsg.code}`, inputMsg.data) : ' ')
+            (inputMsg.code ? localize(`api_errors.${inputMsg.code}`, { ...(inputMsg.data || {}), defaultValue: localize('api_errors.fallback') }) : ' ')
             : localize('com_ui_please_enter_question')
     }, [inputDisabled, inputMsg, localize]);
 
@@ -47,11 +48,12 @@ export default function ChatInput({ readOnly, v }) {
     }, [inputDisabled]);
 
     return (
-        <div className="absolute z-10 px-4 bottom-0 w-full pt-1 bg-[#fff] dark:bg-[#1B1B1B]">
-            {/* drag upload overlay */}
-            {isDragging && <DragDropOverlay />}
+        <div className="z-10 w-full shrink-0 bg-[#fff] dark:bg-[#1B1B1B]">
+            <div className="mx-auto w-full max-w-[800px] px-4 pt-1">
+                {/* drag upload overlay */}
+                {isDragging && <DragDropOverlay />}
 
-            <div className="relative px-4 rounded-3xl bg-surface-tertiary">
+                <div className="relative px-4 rounded-3xl bg-surface-tertiary">
                 {/* attr file */}
                 {showUpload && <InputFiles
                     ref={inputFilesRef}
@@ -61,7 +63,11 @@ export default function ChatInput({ readOnly, v }) {
                     disabled={readOnly || audioOpening || inputDisabled}
                     size={bishengConfig?.uploaded_files_maximum_size || 50}
                     onChange={(files => {
-                        setFileUploading(!files);
+                        if (files === null) {
+                            setFileUploading(true);
+                            return;
+                        }
+                        setFileUploading(false);
                         setChatFiles(files);
                     })} />}
 
@@ -70,17 +76,17 @@ export default function ChatInput({ readOnly, v }) {
                     {showVoice && <SpeechToTextComponent disabled={inputDisabled || readOnly || showStop} onChange={(e) => inputRef.current.value += e} />}
                     {showStop ?
                         <div
-                            className="w-8 h-8 bg-primary rounded-full cursor-pointer flex justify-center items-center"
+                            className="btn-brand-primary w-8 h-8 bg-primary rounded-full cursor-pointer flex justify-center items-center"
                             onClick={handleStopClick}
                         >
                             <div className="size-3 bg-white rounded-[2px]"></div>
                         </div> :
                         <button
                             id="bs-send-btn"
-                            className="size-8 flex items-center justify-center rounded-full bg-primary text-white transition-all duration-200 disabled:cursor-not-allowed disabled:text-text-secondary disabled:opacity-20"
+                            className="btn-brand-primary size-8 flex items-center justify-center rounded-full bg-primary text-white transition-all duration-200 disabled:cursor-not-allowed disabled:bg-fill-3 disabled:text-text-3 disabled:opacity-100 [&>svg]:text-white disabled:[&>svg]:text-text-2"
                             disabled={inputDisabled || fileUploading || readOnly || audioOpening}
                             onClick={() => { !inputDisabled && !fileUploading && handleSendClick() }}>
-                            <SendIcon size={24} />
+                            <SendIcon size={18} />
                         </button>
                     }
                 </div>
@@ -119,8 +125,9 @@ export default function ChatInput({ readOnly, v }) {
                     placeholder={placholder}
                     className={"resize-none bg-transparent border-none p-4 pr-10 text-md min-h-24 max-h-80 scrollbar-hide"}
                 ></Textarea>
+                </div>
+                <p className="text-center text-sm pt-2 pb-4 text-gray-400">{bishengConfig?.dialog_tips}</p>
             </div>
-            <p className="text-center text-sm pt-2 pb-4 text-gray-400">{bishengConfig?.dialog_tips}</p>
         </div>
     );
 };

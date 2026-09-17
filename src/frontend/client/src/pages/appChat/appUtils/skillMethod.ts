@@ -1,6 +1,6 @@
 import { formatDate } from "~/utils";
 
-const runLogsTypes = ['tool', 'flow', 'knowledge']
+export const runLogsTypes = ['tool', 'flow', 'knowledge']
 // 兼容处理技能和助手
 export const SkillMethod = {
     /** 获取input发送参数 */
@@ -14,7 +14,7 @@ export const SkillMethod = {
             inputs: {}
         } as any
         if (flow.flow_type === 1) {
-            let inputs = tabs[flow.id].formKeysData.input_keys;
+            const inputs = tabs[flow.id].formKeysData.input_keys;
             const input = inputs.find((el: any) => !el.type)
             const inputKey = input ? Object.keys(input)[0] : '';
             if (message) msgData.inputs = { ...input, [inputKey]: message }
@@ -97,10 +97,15 @@ export const SkillMethod = {
             })
             cover = false
         }
+        // wsdata.messageId only carries the real DB id on the end branch (see above).
+        // When present it MUST overwrite any temp id assigned during streaming —
+        // otherwise like/telemetry calls keep using the temp id and the backend
+        // silently drops the audit record.
+        const realMessageId = !isRunLog && wsdata.messageId
         const newCurrentMessage = {
             ...currentMessage,
             ...wsdata,
-            id: currentMessage.id || (isRunLog ? wsdata.extra : wsdata.messageId), // 每条消息必唯一
+            id: realMessageId || currentMessage.id || (isRunLog ? wsdata.extra : undefined),
             message,
             reasoning_log,
             thought: currentMessage.thought + (wsdata.thought ? `${wsdata.thought}\n` : ''),
@@ -108,10 +113,10 @@ export const SkillMethod = {
             category: wsdata.category || '',
             source: wsdata.source
         }
-        // 无id补上（如文件解析完成消息，后端无返回messageid）
+        // Fallback: assign a recognisable temp id so React keys stay unique while
+        // streaming, without polluting downstream calls that need a real DB id.
         if (!newCurrentMessage.id) {
-            newCurrentMessage.id = Math.random() * 1000000
-            // console.log('msg:', newCurrentMessage);
+            newCurrentMessage.id = 'tmp-' + Math.random().toString(36).slice(2, 10)
         }
 
         messages[currentMessageIndex] = newCurrentMessage

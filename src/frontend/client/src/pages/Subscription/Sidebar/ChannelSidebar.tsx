@@ -1,6 +1,6 @@
-import { useLocalize } from "~/hooks";
+import { useLocalize, useWorkbenchMenuNames } from "~/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
     Channel,
@@ -13,18 +13,33 @@ import { ChannelBlocksArrowsIcon } from "~/components/icons/channels";
 import ChannelItem from "./ChannelItem";
 import { SectionHeader } from "./SectionHeader";
 import { useChannelActions } from "../hooks/useChannelActions";
+import { UserPopMenu } from "~/layouts/UserPopMenu";
+import { useGetBsConfig } from "~/hooks/queries/data-provider";
+import { HubModuleNavTabs } from "~/components/Nav/HubModuleNavTabs";
+import { MobileSidebarHeaderTabs } from "~/components/Nav/MobileSidebarHeaderTabs";
+import { cn } from "~/utils";
 
+// NOTE (dead code, kept intentionally): ChannelSidebar is only rendered by the
+// H5 drawer in Subscription/index.tsx, gated on `channelListDrawerOpen`, which is
+// never set to `true` anywhere — so this component (and its per-row ChannelItem
+// menu) is currently unreachable in both PC and H5. The live channel list is the
+// header `ChannelSwitcher` dropdown (name + pin only); management actions live on
+// the `ChannelActionsMenu` settings button (lazy via channel detail). Left in place
+// per request rather than removed.
 interface ChannelSidebarProps {
     activeChannelId?: string;
     onChannelSelect: (channel: Channel | null) => void;
     onCreateChannel: () => void;
     onChannelSquare: () => void;
-    onManageMembers: (channel: Channel) => void;
     onChannelSettings: (channel: Channel) => void;
     /** Report created channel count back to parent so it doesn't need a duplicate query */
     onCreatedCountChange?: (count: number) => void;
     /** When true, skip auto-selecting the first channel (e.g. share route is resolving) */
     suppressAutoSelect?: boolean;
+    /** H5：置于订阅页固定抽屉内，隐藏 PC 折叠把手，宽度随父容器 */
+    mobileDrawerMode?: boolean;
+    /** H5 抽屉：右上角关闭 */
+    onDrawerClose?: () => void;
 }
 
 export function ChannelSidebar({
@@ -32,12 +47,16 @@ export function ChannelSidebar({
     onChannelSelect,
     onCreateChannel,
     onChannelSquare,
-    onManageMembers,
     onChannelSettings,
     onCreatedCountChange,
     suppressAutoSelect,
+    mobileDrawerMode = false,
+    onDrawerClose,
 }: ChannelSidebarProps) {
     const localize = useLocalize();
+    // 模块标题跟随后台配置的菜单显示名称
+    const menuNames = useWorkbenchMenuNames();
+    const { data: bsConfig } = useGetBsConfig();
     const [collapsed, setCollapsed] = useState(false);
     const [createdCollapsed, setCreatedCollapsed] = useState(false);
     const [subscribedCollapsed, setSubscribedCollapsed] = useState(false);
@@ -93,6 +112,10 @@ export function ChannelSidebar({
         onCreatedCountChange?.(createdChannels.length);
     }, [createdChannels.length, onCreatedCountChange]);
 
+    useEffect(() => {
+        if (mobileDrawerMode) setCollapsed(false);
+    }, [mobileDrawerMode]);
+
     const getSortText = (sortType: SortType) => {
         switch (sortType) {
             case SortType.RECENT_UPDATE: return localize("com_subscription.recently_updated");
@@ -122,30 +145,61 @@ export function ChannelSidebar({
     };
 
     return (
-        <div className="relative flex-shrink-0">
+        <div className={cn("relative h-full min-h-0 shrink-0", mobileDrawerMode && "w-full")}>
             <div
                 className={[
-                    "h-full bg-white border-r border-[#e5e6eb] flex flex-col overflow-hidden",
-                    collapsed ? "w-0" : "w-60",
-                ].join(" ")}
-                style={{
-                    transitionProperty: 'width',
-                    transitionDuration: '300ms',
-                    transitionTimingFunction: 'ease-in-out'
-                }}
+                    "h-full bg-white flex flex-col overflow-hidden",
+                    !mobileDrawerMode && "border-r border-border-base",
+                    mobileDrawerMode ? "w-full" : collapsed ? "w-0" : "w-60",
+                ].filter(Boolean).join(" ")}
+                style={
+                    mobileDrawerMode
+                        ? undefined
+                        : {
+                            transitionProperty: "width",
+                            transitionDuration: "300ms",
+                            transitionTimingFunction: "ease-in-out",
+                        }
+                }
             >
-                {/* 顶部操作区 */}
+                {mobileDrawerMode ? (
+                    <>
+                        <MobileSidebarHeaderTabs
+                            logoSrc={bsConfig?.sidebarIcon?.image ? __APP_ENV__.BASE_URL + bsConfig.sidebarIcon.image : undefined}
+                            onClose={onDrawerClose}
+                            onLinkClick={(link) => {
+                                if (link.closeDrawerOnNavigate) onDrawerClose?.();
+                            }}
+                        />
+                        <div className="shrink-0 px-3 pt-4 pb-6">
+                            <Button
+                                variant="secondary"
+                                type="button"
+                                onClick={() => {
+                                    onCreateChannel();
+                                    onDrawerClose?.();
+                                }}
+                                className="flex h-9 w-full items-center justify-center gap-1 border border-border-base bg-white text-[13px] text-text-1 hover:bg-fill-1"
+                            >
+                                <Plus className="size-4" />
+                                {localize("com_subscription.create")}
+                            </Button>
+                        </div>
+                    </>
+                ) : null}
+                {/* 顶部操作区 — PC */}
+                {!mobileDrawerMode ? (
                 <div className={collapsed ? "px-0 py-5" : "px-3 py-5"}>
-                    <div className={collapsed ? "flex items-center justify-center h-7" : "border-b border-[#e5e6eb] space-y-4 pb-4"}>
-                        {!collapsed && <div className="px-2 flex justify-between items-center text-[16px] font-medium">
-                            <span>{localize("com_subscription.subscribe")}</span>
+                    <div className={collapsed ? "flex items-center justify-center h-7" : "border-b border-border-base space-y-4 pb-4"}>
+                        {!collapsed && <div className="px-2 flex justify-between items-center text-[16px] font-semibold">
+                            <span>{menuNames.channel}</span>
                         </div>}
                         {!collapsed && (
                             <div className="flex items-center gap-3">
-                                <Button variant="secondary" onClick={onCreateChannel} className="flex-1 h-8 text-[13px] bg-[#F7F7F7] hover:bg-[#E5E6EB] border-none gap-1">
+                                <Button variant="secondary" onClick={onCreateChannel} className="flex-1 h-8 text-[13px] bg-fill-1 hover:bg-fill-3 border-none gap-1">
                                     <Plus className="size-4" />{localize("com_subscription.create")}
                                 </Button>
-                                <Button variant="secondary" onClick={onChannelSquare} className="flex-1 h-8 text-[13px] bg-[#F7F7F7] hover:bg-[#E5E6EB] border-none gap-1">
+                                <Button variant="secondary" onClick={onChannelSquare} className="flex-1 h-8 text-[13px] bg-fill-1 hover:bg-fill-3 border-none gap-1">
                                     <ChannelBlocksArrowsIcon className="size-4" />
                                     {localize("com_subscription.go_to_square")}
                                 </Button>
@@ -153,6 +207,7 @@ export function ChannelSidebar({
                         )}
                     </div>
                 </div>
+                ) : null}
 
                 {/* 列表区（折叠时隐藏内容，但保持容器以产生宽度过渡） */}
                 <div
@@ -167,7 +222,7 @@ export function ChannelSidebar({
                     }}
                 >
                     <div
-                        className="h-full overflow-y-auto scroll-on-scroll px-3 pb-5"
+                        className="h-full overflow-y-auto overscroll-y-contain scroll-on-scroll px-3 pb-5"
                         onScroll={handleListScroll}
                         data-scrolling={isListScrolling ? "true" : "false"}
                     >
@@ -193,11 +248,10 @@ export function ChannelSidebar({
                                             onDelete={handleDeleteChannel}
                                             onUnsubscribe={handleUnsubscribeChannel}
                                             onPin={handlePinChannel}
-                                            onManageMembers={onManageMembers}
                                             onChannelSettings={onChannelSettings}
                                         />
                                     ))}
-                                    {!createdChannels.length && <div className="py-6 text-center text-sm text-[#818181]">{localize("com_subscription.no_data")}</div>}
+                                    {!createdChannels.length && <div className="py-6 text-center text-sm text-text-3">{localize("com_subscription.no_data")}</div>}
                                 </div>
                             )}
                         </div>
@@ -224,25 +278,31 @@ export function ChannelSidebar({
                                             onDelete={handleDeleteChannel}
                                             onUnsubscribe={handleUnsubscribeChannel}
                                             onPin={handlePinChannel}
-                                            onManageMembers={onManageMembers}
                                             onChannelSettings={onChannelSettings}
                                         />
                                     ))}
-                                    {!subscribedChannels.length && <div className="py-6 text-center text-sm text-[#818181]">{localize("com_subscription.no_data")}</div>}
+                                    {!subscribedChannels.length && <div className="py-6 text-center text-sm text-text-3">{localize("com_subscription.no_data")}</div>}
                                 </div>
                             )}
                         </div>
                     </div>
                 </div>
+                {mobileDrawerMode ? (
+                    <div className="shrink-0 border-t border-border-base px-2 pb-2 pt-1">
+                        <UserPopMenu variant="drawer" />
+                    </div>
+                ) : null}
             </div>
-            <NavToggle
-                navVisible={!collapsed}
-                onToggle={() => setCollapsed((v) => !v)}
-                isHovering={isToggleHovering}
-                setIsHovering={setIsToggleHovering}
-                className="absolute top-1/2 left-0 z-[10]"
-                translateX={230}
-            />
+            {!mobileDrawerMode ? (
+                <NavToggle
+                    navVisible={!collapsed}
+                    onToggle={() => setCollapsed((v) => !v)}
+                    isHovering={isToggleHovering}
+                    setIsHovering={setIsToggleHovering}
+                    className="absolute top-1/2 left-0 z-[10]"
+                    translateX={240}
+                />
+            ) : null}
         </div>
     );
 };

@@ -39,7 +39,7 @@ const AnimatedSearchInput = ({
             placeholder={placeholder}
             className={`
               peer relative z-20 w-full rounded-lg bg-surface-secondary px-10
-              py-2 outline-none ring-0 backdrop-blur-sm transition-all
+              py-2 outline-none ring-0 transition-all
               duration-500 ease-in-out placeholder:text-gray-400
               focus:outline-none focus:ring-0
             `}
@@ -82,7 +82,7 @@ const AnimatedSearchInput = ({
         <div className="absolute inset-0">
           <div
             className={`
-              bg-gradient-radial absolute inset-0 from-blue-500/10 to-transparent
+              bg-gradient-radial absolute inset-0 from-blue-500/[0.07] to-transparent
               transition-opacity duration-700 ease-in-out
               ${isSearching && hasValue ? 'animate-pulse-slow opacity-100' : 'opacity-0'}
             `}
@@ -98,8 +98,8 @@ const AnimatedSearchInput = ({
       </div>
       <div
         className={`
-          absolute inset-0 -z-20 scale-100 bg-gradient-to-r from-blue-500/10 
-          via-purple-500/10 to-blue-500/10 opacity-0 blur-xl
+          absolute inset-0 -z-20 scale-100 bg-gradient-to-r from-blue-500/[0.07] 
+          via-purple-500/10 to-blue-500/[0.07] opacity-0 blur-xl
           transition-all duration-500 ease-in-out
           peer-focus:scale-105 peer-focus:opacity-100
         `}

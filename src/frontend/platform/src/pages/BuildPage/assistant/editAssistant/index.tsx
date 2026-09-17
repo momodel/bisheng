@@ -1,16 +1,18 @@
+// @ts-strict-ignore
 import ApiMainPage from "@/components/bs-comp/apiComponent";
 import { useMessageStore } from "@/components/bs-comp/chatComponent/messageStore";
+import { hasResourceAction, useResourceActions } from "@/components/bs-comp/permission/useResourceActions";
 import { Button } from "@/components/bs-ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/bs-ui/dialog";
 import { useToast } from "@/components/bs-ui/toast/use-toast";
-import { changeAssistantStatusApi, saveAssistanttApi } from "@/controllers/API/assistant";
+import { changeAssistantStatusApi, getAssistantDetailApi, saveAssistanttApi } from "@/controllers/API/assistant";
 import { checkAppEditPermission } from "@/controllers/API/flow";
 import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
 import { useAssistantStore } from "@/store/assistantStore";
 import { OnlineState } from "@/types/flow";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router";
+import { useLocation } from "react-router-dom";
 import { unstable_useBlocker as useBlocker, useNavigate, useParams } from "react-router-dom";
 import Header from "./Header";
 import Prompt from "./Prompt";
@@ -25,19 +27,23 @@ export default function editAssistant() {
     const loca = state?.flow; // Get the passed flow data
 
     // assistant data
-    const { assistantState, changed, loadAssistantState, changeStatus, saveAfter, destroy } = useAssistantStore()
+    const { assistantState, changed, setAssistantDetail, changeStatus, saveAfter, destroy } = useAssistantStore()
     const { startNewRound, insetSystemMsg, insetBsMsg, destory, setShowGuideQuestion } = useMessageStore()
     const [checking, setChecking] = useState(true)
+    const assistantId = assisId ? String(assisId) : ''
+    const { actions } = useResourceActions('assistant', assistantId ? [assistantId] : [], ['edit'])
+    const canEdit = assistantId ? hasResourceAction(actions, assistantId, 'edit') : false
 
     const flowInit = async () => {
         await checkAppEditPermission(assisId, 5)
 
-        loadAssistantState(assisId, 'v1').then((res) => {
+        captureAndAlertRequestErrorHoc(getAssistantDetailApi(assisId, 'v1').then((res) => {
+            setAssistantDetail(res)
             setChecking(false)
             setShowGuideQuestion(true)
             setGuideQuestion(res.guide_question?.filter((item) => item) || [])
             res.guide_word && insetBsMsg(res.guide_word)
-        })
+        }))
     }
 
     useEffect(() => {
@@ -49,6 +55,7 @@ export default function editAssistant() {
     const [openChat, setOpenChat] = useState(true)
     const handleStartChat = async (save) => {
         if (!handleCheck()) return
+        if (save && !canEdit) return
         destory()
         setOpenChat(false)
         save ? await handleSave(true) : await new Promise((resolve) => setTimeout(resolve, 0))
@@ -62,6 +69,7 @@ export default function editAssistant() {
     const { message, toast } = useToast()
     // Save assistant details
     const handleSave = async (showMessage = false) => {
+        if (!canEdit) return
         if (!handleCheck()) return
         await captureAndAlertRequestErrorHoc(saveAssistanttApi({
             ...assistantState,
@@ -146,6 +154,7 @@ export default function editAssistant() {
     // Save on leave
     const blocker = useBeforeUnload(changed, checking)
     const handleSaveAndClose = async () => {
+        if (!canEdit) return blocker.reset?.()
         await handleSave(true)
         blocker.proceed?.()
     }
@@ -153,13 +162,13 @@ export default function editAssistant() {
     if (checking) return null
 
     return <div className="bg-background-main">
-        <Header loca={loca} onSave={() => handleSave(true)} onLine={handleOnline} onTabChange={(t) => setShowApiPage(t === 'api')}></Header>
-        <div className="h-[calc(100vh-70px)]">
+        <Header loca={loca} canEdit={canEdit} onSave={() => handleSave(true)} onLine={handleOnline} onTabChange={(t) => setShowApiPage(t === 'api')}></Header>
+        <div className="h-[calc(100vh-70px-var(--license-banner-h,0px))]">
             <div className={`flex h-full ${showApiPage ? 'hidden' : ''}`}>
                 <div className="w-[60%]">
                     <div className="text-md font-medium leading-none p-4 shadow-sm">{t('build.assistantConfiguration')}</div>
-                    <div className="flex h-[calc(100vh-120px)]">
-                        <Prompt></Prompt>
+                    <div className="flex h-[calc(100vh-120px-var(--license-banner-h,0px))]">
+                        <Prompt canEdit={canEdit}></Prompt>
                         <Setting></Setting>
                     </div>
                 </div>
@@ -208,7 +217,7 @@ const useBeforeUnload = (changed, checking) => {
     useEffect(() => {
         if (checking) return // Don't prompt when checking permissions
         const fun = (e) => {
-            var confirmationMessage = `${t('flow.unsavedChangesConfirmation')}`;
+            const confirmationMessage = `${t('flow.unsavedChangesConfirmation')}`;
             (e || window.event).returnValue = confirmationMessage; // Compatible with different browsers
             return confirmationMessage;
         }

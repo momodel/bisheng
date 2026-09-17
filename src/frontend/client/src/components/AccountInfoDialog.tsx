@@ -25,10 +25,10 @@ function PasswordStrengthRow({ met, children }: { met: boolean; children: ReactN
     return (
         <div className="flex items-start gap-2 text-[12px] leading-5">
             <span
-                className={cn("mt-[5px] size-1.5 shrink-0 rounded-full", met ? "bg-[#25C298]" : "bg-[#c9cdd4]")}
+                className={cn("mt-[5px] size-1.5 shrink-0 rounded-full", met ? "bg-[#25C298]" : "bg-fill-4")}
                 aria-hidden
             />
-            <span className={cn(met ? "text-[#25C298]" : "text-[#86909c]")}>{children}</span>
+            <span className={cn(met ? "text-[#25C298]" : "text-text-3")}>{children}</span>
         </div>
     );
 }
@@ -46,7 +46,7 @@ export function AccountInfoDialog({
     onOpenChange,
     username = "admin",
     avatarUrl = "/path-to-avatar.png",
-    onAvatarUpdated
+    onAvatarUpdated,
 }: AccountInfoDialogProps) {
     const localize = useLocalize();
     const [isEditing, setIsEditing] = useState(false);
@@ -186,6 +186,15 @@ export function AccountInfoDialog({
                 return;
             }
 
+            // 10622：密码强度不达标（后端校验），按当前语言本地化提示
+            if (code === 10622) {
+                showToast({
+                    message: localize("api_errors.10622"),
+                    severity: NotificationSeverity.ERROR
+                });
+                return;
+            }
+
             const errorMessage =
                 error?.response?.data?.status_message ||
                 error?.response?.data?.message ||
@@ -304,31 +313,35 @@ export function AccountInfoDialog({
     };
 
     const inputClassName =
-        "h-9 rounded-md border border-[#ECECEC] bg-white pr-10 text-[14px] text-[#1d2129] placeholder:text-[#c9cdd4] focus-visible:border-[#165dff] focus-visible:ring-1 focus-visible:ring-[#165dff]";
+        "h-9 rounded-md border border-border-base bg-white pr-10 text-[14px] text-text-1 placeholder:text-text-4 focus-visible:border-[#DDDDDD] focus-visible:ring-2 focus-visible:ring-[#F1F5F9]";
 
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent
                 close={false}
-                className="flex h-[600px] max-h-[calc(100vh-32px)] w-[600px] max-w-[calc(100vw-32px)] flex-col gap-0 overflow-hidden rounded-lg border border-[#ECECEC] bg-white p-0 shadow-[0_8px_24px_rgba(15,23,42,0.12)]"
+                className={cn(
+                    "flex h-[600px] max-h-[calc(100vh-32px)] w-[600px] max-w-[calc(100vw-32px)] flex-col gap-0 overflow-hidden rounded-xl sm:rounded-xl border border-border-base bg-white p-0 shadow-[0_8px_24px_rgba(15,23,42,0.12)]",
+                    // H5：全屏页面（与 tailwind touch-mobile = max-width 1023px 一致）
+                    "touch-mobile:inset-x-0 touch-mobile:bottom-0 touch-mobile:left-0 touch-mobile:right-0 touch-mobile:top-0 touch-mobile:h-[100dvh] touch-mobile:max-h-[100dvh] touch-mobile:w-full touch-mobile:max-w-none touch-mobile:translate-x-0 touch-mobile:translate-y-0 touch-mobile:rounded-none touch-mobile:border-0 touch-mobile:shadow-none",
+                )}
             >
-                {/* 标题栏 600×48 — 设计稿 */}
-                <div className="flex h-12 w-full shrink-0 items-center justify-between px-6">
-                    <h2 className="text-[16px] font-semibold leading-6 text-[#1d2129]">
+                {/* 标题栏 */}
+                <div className="flex h-12 w-full shrink-0 items-center justify-between px-5 touch-mobile:px-4">
+                    <h2 className="text-[16px] font-semibold leading-6 text-text-1">
                         {localize("com_account_info_title")}
                     </h2>
                     <button
                         type="button"
                         onClick={() => handleOpenChange(false)}
-                        className="flex size-8 shrink-0 items-center justify-center rounded-md text-[#86909c] transition-colors hover:bg-[#f2f3f5] hover:text-[#1d2129]"
+                        className="rounded-lg text-text-3 opacity-70 transition-opacity hover:opacity-100 focus:outline-none"
                         aria-label={localize("com_ui_close")}
                     >
-                        <X className="size-4" />
+                        <X className="h-4 w-4" />
                     </button>
                 </div>
 
-                {/* 内容区：552 宽、稿内约 462 高区块 + 边距，整体在 600×600 内不滚动 */}
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-4">
+                {/* 内容区：桌面固定稿；移动端全屏时可滚动 */}
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4 touch-mobile:overflow-y-auto touch-mobile:px-4">
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -337,57 +350,57 @@ export function AccountInfoDialog({
                         onChange={handleAvatarChange}
                     />
 
-                    <div className="mx-auto flex w-[552px] max-w-[min(728px,100%)] flex-col gap-5">
+                    <div className="mx-auto flex w-[552px] max-w-[min(728px,100%)] flex-1 flex-col gap-5 touch-mobile:w-full touch-mobile:max-w-full touch-mobile:flex-none">
                         <section className="flex flex-col gap-5">
-                            <h3 className="text-[14px] font-semibold leading-5 text-[#212121]">
+                            <h3 className="text-[14px] font-semibold leading-5 text-text-1">
                                 {localize("com_account_info_basic_info")}
                             </h3>
-                            <div className="flex items-center gap-4 border-b border-[#f2f3f5] pb-3">
+                            <div className="flex items-center gap-4 border-b border-fill-2 pb-3">
                                 <button
                                     type="button"
                                     onClick={handleAvatarClick}
                                     title={localize("com_account_info_change_avatar")}
-                                    className="group relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#165dff] focus-visible:ring-offset-2"
+                                    className="group relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                                 >
-                                    <Avatar className="size-14 ring-1 ring-[#f2f3f5]">
+                                    <Avatar className="size-14 ring-1 ring-fill-2">
                                         {currentAvatarUrl ? <AvatarImage src={currentAvatarUrl} alt="User" /> : <AvatarName name={username} />}
                                     </Avatar>
                                     <div className="absolute inset-0 flex items-center justify-center rounded-full bg-[rgba(0,0,0,0.55)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                                         <Camera className="size-6 text-white" aria-hidden />
                                     </div>
                                 </button>
-                                <p className="min-w-0 text-[14px] leading-6 text-[#212121]">
+                                <p className="min-w-0 text-[14px] leading-6 text-text-1">
                                     <span className="font-medium">{username}</span>
                                     <span>{localize("com_account_info_username_suffix")}</span>
                                 </p>
                             </div>
                         </section>
 
-                        <section className="flex flex-col gap-5">
-                            <h3 className="text-[14px] font-semibold leading-5 text-[#1d2129]">
+                        <section className="flex flex-1 flex-col gap-5">
+                            <h3 className="text-[14px] font-semibold leading-5 text-text-1">
                                 {localize("com_account_info_security_settings")}
                             </h3>
 
                             {!isEditing ? (
                                 <div className="flex items-center justify-between gap-4">
                                     <div className="min-w-0">
-                                        <div className="mb-1 text-[14px] text-[#86909c]">{localize("com_auth_password")}</div>
-                                        <div className="text-[14px] tracking-[0.12em] text-[#1d2129]">
+                                        <div className="mb-1 text-[14px] text-text-3">{localize("com_auth_password")}</div>
+                                        <div className="text-[14px] tracking-[0.12em] text-text-1">
                                             ••••••••••••••••
                                         </div>
                                     </div>
                                     <button
                                         type="button"
                                         onClick={() => setIsEditing(true)}
-                                        className="h-8 shrink-0 rounded-md border border-[#e5e6eb] bg-white px-4 text-[14px] text-[#1d2129] transition-colors hover:bg-[#f7f8fa]"
+                                        className="h-8 shrink-0 rounded-md border border-border-base bg-white px-4 text-[14px] text-text-1 transition-colors hover:bg-fill-1"
                                     >
                                         {localize("com_account_info_edit")}
                                     </button>
                                 </div>
                             ) : (
-                                <div className="flex flex-col gap-5">
+                                <div className="flex flex-1 flex-col gap-5">
                                     <div>
-                                        <label className="mb-1 block text-[14px] text-[#4e5969]" htmlFor="account-old-pwd">
+                                        <label className="mb-1 block text-[14px] text-text-2" htmlFor="account-old-pwd">
                                             {localize("com_account_info_old_password")}
                                         </label>
                                         <div className="relative">
@@ -402,7 +415,7 @@ export function AccountInfoDialog({
                                             <button
                                                 type="button"
                                                 onClick={() => setShowOldPassword(!showOldPassword)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#86909c] hover:text-[#4e5969]"
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-3 hover:text-text-2"
                                             >
                                                 {showOldPassword ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
                                             </button>
@@ -410,7 +423,7 @@ export function AccountInfoDialog({
                                     </div>
 
                                     <div>
-                                        <label className="mb-1 block text-[14px] text-[#4e5969]" htmlFor="account-new-pwd">
+                                        <label className="mb-1 block text-[14px] text-text-2" htmlFor="account-new-pwd">
                                             {localize("com_account_info_new_password")}
                                         </label>
                                         <div className="relative">
@@ -425,14 +438,14 @@ export function AccountInfoDialog({
                                             <button
                                                 type="button"
                                                 onClick={() => setShowNewPassword(!showNewPassword)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#86909c] hover:text-[#4e5969]"
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-3 hover:text-text-2"
                                             >
                                                 {showNewPassword ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
                                             </button>
                                         </div>
 
                                         <div className="mt-2 flex flex-col gap-1.5">
-                                            <p className="text-[12px] text-[#86909c]">{localize("com_account_info_password_strength")}</p>
+                                            <p className="text-[12px] text-text-3">{localize("com_account_info_password_strength")}</p>
                                             <PasswordStrengthRow met={passwordStrength.minLength}>
                                                 {localize("com_account_info_password_rule_min")}
                                             </PasswordStrengthRow>
@@ -443,7 +456,7 @@ export function AccountInfoDialog({
                                     </div>
 
                                     <div>
-                                        <label className="mb-1 block text-[14px] text-[#4e5969]" htmlFor="account-confirm-pwd">
+                                        <label className="mb-1 block text-[14px] text-text-2" htmlFor="account-confirm-pwd">
                                             {localize("com_auth_password_confirm")}
                                         </label>
                                         <div className="relative">
@@ -458,18 +471,19 @@ export function AccountInfoDialog({
                                             <button
                                                 type="button"
                                                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#86909c] hover:text-[#4e5969]"
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-3 hover:text-text-2"
                                             >
                                                 {showConfirmPassword ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
                                             </button>
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center justify-end gap-4">
+                                    {/* Desktop：表单项内操作；H5 仅用底部通栏按钮 */}
+                                    <div className="mt-auto hidden touch-desktop:flex items-center justify-end gap-4">
                                         <button
                                             type="button"
                                             onClick={handleCancel}
-                                            className="text-[14px] text-[#4e5969] transition-colors hover:text-[#1d2129]"
+                                            className="h-8 rounded-md border border-border-base bg-white px-4 text-[14px] font-normal text-text-2 transition-colors hover:bg-fill-1 hover:text-text-1"
                                         >
                                             {localize("cancel")}
                                         </button>
@@ -478,10 +492,10 @@ export function AccountInfoDialog({
                                             onClick={handleSubmit}
                                             disabled={isSubmitDisabled()}
                                             className={cn(
-                                                "h-9 rounded-md px-5 text-[14px] font-normal text-white disabled:opacity-100",
+                                                "h-8 rounded-md px-4 text-[14px] font-normal text-white disabled:opacity-100",
                                                 isSubmitDisabled()
-                                                    ? "cursor-not-allowed bg-[#7399E4] hover:bg-[#7399E4]"
-                                                    : "bg-[#0253E8] hover:bg-[#0246cc]"
+                                                    ? "cursor-not-allowed bg-blue-300 hover:bg-blue-300"
+                                                    : "bg-blue-600 hover:bg-blue-700"
                                             )}
                                         >
                                             {localize("com_account_info_confirm_change")}
@@ -492,6 +506,31 @@ export function AccountInfoDialog({
                         </section>
                     </div>
                 </div>
+                {isEditing ? (
+                    <div
+                        className="flex w-full shrink-0 items-stretch gap-3 border-t border-border-base bg-white px-4 py-3 touch-mobile:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] touch-desktop:hidden"
+                    >
+                        <Button
+                            variant="outline"
+                            onClick={handleCancel}
+                            className="h-11 flex-1 rounded-lg border-border-base px-4 text-[15px] font-normal text-text-2 hover:bg-fill-1"
+                        >
+                            {localize("cancel")}
+                        </Button>
+                        <Button
+                            onClick={handleSubmit}
+                            disabled={isSubmitDisabled()}
+                            className={cn(
+                                "h-11 flex-1 rounded-lg px-4 text-[15px] font-normal",
+                                isSubmitDisabled()
+                                    ? "cursor-not-allowed bg-fill-3 text-text-4 hover:bg-fill-3"
+                                    : "bg-blue-500 text-white hover:bg-blue-400 btn-brand-primary",
+                            )}
+                        >
+                            {localize("com_account_info_confirm_change")}
+                        </Button>
+                    </div>
+                ) : null}
             </DialogContent>
         </Dialog>
     );

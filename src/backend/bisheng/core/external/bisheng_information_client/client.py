@@ -1,58 +1,73 @@
 from enum import Enum
-from typing import Callable, Optional, Union
+from typing import Callable, Optional
 
 import httpx
 from aiohttp import ClientTimeout
+from loguru import logger
 
-from bisheng.common.errcode.channel import BishengInformationUnAuthorizedError, BishengInformationServiceError, \
-    InformationSourceParseError, InformationSourceAuthError, InformationSourcePageError, \
-    InformationSourceCrawlLimitError, InformationSourceSubscriptionLimitError, \
-    InformationSourceWechatSearchLimitError
-from bisheng.core.external.bisheng_information_client.response_schema import InformationSourceResponse, \
-    CrawlWebsiteResponse, InformationArticlesResponse
+from bisheng.common.errcode.channel import (
+    BishengInformationServiceError,
+    BishengInformationUnAuthorizedError,
+    InformationSourceAuthError,
+    InformationSourceCrawlLimitError,
+    InformationSourcePageError,
+    InformationSourceParseError,
+    InformationSourceSubscriptionLimitError,
+    InformationSourceWechatSearchLimitError,
+)
+from bisheng.core.config.settings import IntelligenceCenterConf
+from bisheng.core.external.bisheng_information_client.response_schema import (
+    CrawlWebsiteResponse,
+    InformationArticlesResponse,
+    InformationSourceResponse,
+)
 from bisheng.core.external.http_client.client import AsyncHttpClient
 
 
 class BusinessType(str, Enum):
     """Business types for information sources."""
-    WECHAT = 'wechat'
-    WEBSITE = 'website'
+
+    WECHAT = "wechat"
+    WEBSITE = "website"
 
 
 class InformationSourceAddError(Exception):
     """Exception raised when adding an information source fails."""
+
     pass
 
 
 class InformationSourceListError(Exception):
     """Exception raised when listing information sources fails."""
+
     pass
 
 
 class InformationSourceSubscribeError(Exception):
     """Exception raised when subscribing to an information source fails."""
+
     pass
 
 
 class BishengInformationClient(object):
-
-    def __init__(self, http_client: AsyncHttpClient, base_url: str,
-                 api_key: Union[str, Callable[[], str]], **kwargs):
+    def __init__(self, http_client: Optional[AsyncHttpClient], get_conf: Callable[[], IntelligenceCenterConf]):
         self.http_client = http_client
-        self.base_url = base_url
-        self._api_key = api_key
-
-        self.timeout = None
-
-        if kwargs.get("timeout"):
-            self.timeout = ClientTimeout(total=kwargs["timeout"])
+        self._get_conf = get_conf
 
     @property
-    def api_key(self) -> str:
-        """Get the API key, supporting both direct string and callable for dynamic retrieval."""
-        if callable(self._api_key):
-            return self._api_key()
-        return self._api_key
+    def conf(self) -> IntelligenceCenterConf:
+        return self._get_conf()
+
+    @staticmethod
+    def _build_timeout(conf: IntelligenceCenterConf) -> Optional[ClientTimeout]:
+        timeout = (conf.kwargs or {}).get("timeout")
+        if timeout:
+            return ClientTimeout(total=timeout)
+        return None
+
+    def _build_request_options(self) -> tuple[str, dict, Optional[ClientTimeout]]:
+        conf = self.conf
+        return conf.base_url.rstrip("/"), {"X-API-Key": conf.api_key}, self._build_timeout(conf)
 
     @staticmethod
     def _raise_limit_error(code: int) -> None:
@@ -73,12 +88,12 @@ class BishengInformationClient(object):
             raise InformationSourcePageError()
 
     def _handle_common_response_code(
-            self,
-            response_body: dict,
-            default_error_message: str,
-            *,
-            include_parse_errors: bool = False,
-            unknown_error_handler: Optional[Callable[[dict], None]] = None,
+        self,
+        response_body: dict,
+        default_error_message: str,
+        *,
+        include_parse_errors: bool = False,
+        unknown_error_handler: Optional[Callable[[dict], None]] = None,
     ) -> None:
         code = response_body.get("code", -1)
         if code == 200:
@@ -101,12 +116,12 @@ class BishengInformationClient(object):
         return response.json()
 
     def _handle_response(
-            self,
-            response,
-            default_error_message: str,
-            *,
-            include_parse_errors: bool = False,
-            unknown_error_handler: Optional[Callable[[dict], None]] = None,
+        self,
+        response,
+        default_error_message: str,
+        *,
+        include_parse_errors: bool = False,
+        unknown_error_handler: Optional[Callable[[dict], None]] = None,
     ) -> dict:
         if response.status_code != 200:
             raise BishengInformationServiceError(
@@ -131,10 +146,10 @@ class BishengInformationClient(object):
 
     async def add_website_information_source(self, url: str) -> InformationSourceResponse:
         """Add a new information source by URL."""
-        endpoint = f"{self.base_url}/information/add_website"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/add_website"
         data = {"url": url}
-        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=self.timeout)
+        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=timeout)
 
         response_body = self._handle_response(
             response,
@@ -148,10 +163,10 @@ class BishengInformationClient(object):
 
     async def add_wechat_information_source(self, url: str) -> InformationSourceResponse:
         """Add a new WeChat information source by URL."""
-        endpoint = f"{self.base_url}/information/add_wechat"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/add_wechat"
         data = {"url": url}
-        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=self.timeout)
+        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=timeout)
 
         response_body = self._handle_response(
             response,
@@ -163,22 +178,19 @@ class BishengInformationClient(object):
 
         return information_source_data
 
-    async def search_information_sources(self, query: str, business_type: Optional[BusinessType] = None, page: int = 1,
-                                         page_size: int = 20) -> tuple[list[InformationSourceResponse], int]:
+    async def search_information_sources(
+        self, query: str, business_type: Optional[BusinessType] = None, page: int = 1, page_size: int = 20
+    ) -> tuple[list[InformationSourceResponse], int]:
         """Search information sources by keyword."""
-        endpoint = f"{self.base_url}/information/search"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/search"
 
-        params = {
-            "keyword": query,
-            "page": page,
-            "page_size": page_size
-        }
+        params = {"keyword": query, "page": page, "page_size": page_size}
 
         if business_type:
             params["business_type"] = business_type.value
 
-        response = await self.http_client.get(endpoint, headers=headers, params=params, timeout=self.timeout)
+        response = await self.http_client.get(endpoint, headers=headers, params=params, timeout=timeout)
         response_body = self._handle_response(response, "Failed to search information sources")
 
         information_sources_data = response_body.get("data", [])
@@ -188,28 +200,25 @@ class BishengInformationClient(object):
 
     async def get_information_source_by_ids(self, source_ids: list[str]) -> list[InformationSourceResponse]:
         """Get information sources by a list of source IDs."""
-        endpoint = f"{self.base_url}/information/source_by_ids"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/source_by_ids"
         data = {"information_ids": source_ids}
-        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=self.timeout)
+        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=timeout)
         response_body = self._handle_response(response, "Failed to get information sources by ids")
 
         information_sources_data = response_body.get("data", [])
         return [InformationSourceResponse.model_validate(item) for item in information_sources_data]
 
-    async def list_information_sources(self, business_type: BusinessType, page: int = 1, page_size: int = 20) -> tuple[
-        list[InformationSourceResponse], int]:
+    async def list_information_sources(
+        self, business_type: BusinessType, page: int = 1, page_size: int = 20
+    ) -> tuple[list[InformationSourceResponse], int]:
         """List all information sources."""
-        endpoint = f"{self.base_url}/information/list"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/list"
 
-        params = {
-            "business_type": business_type.value,
-            "page": page,
-            "page_size": page_size
-        }
+        params = {"business_type": business_type.value, "page": page, "page_size": page_size}
 
-        response = await self.http_client.get(endpoint, headers=headers, params=params, timeout=self.timeout)
+        response = await self.http_client.get(endpoint, headers=headers, params=params, timeout=timeout)
         response_body = self._handle_response(response, "Failed to list information sources")
 
         information_sources_data = response_body.get("data", [])
@@ -220,22 +229,30 @@ class BishengInformationClient(object):
 
     async def subscribe_information_source(self, source_ids: list[str]) -> None:
         """Subscribe to an information source by source_id."""
-        endpoint = f"{self.base_url}/information/subscribe"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/subscribe"
         data = {"information_ids": source_ids}
-        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=self.timeout)
-        self._handle_response(
-            response,
-            "Failed to subscribe to information source",
-            unknown_error_handler=lambda _: self._raise_subscribe_error(response, "subscribe to"),
-        )
+        try:
+            response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=timeout)
+            self._handle_response(
+                response,
+                "Failed to subscribe to information source",
+                unknown_error_handler=lambda _: self._raise_subscribe_error(response, "subscribe to"),
+            )
+        except Exception:
+            logger.exception(
+                "BISHENG_INFORMATION_SUBSCRIPTION_REQUEST_FAILED endpoint={} source_count={}",
+                endpoint,
+                len(source_ids),
+            )
+            raise
 
     async def unsubscribe_information_source(self, source_ids: list[str]) -> None:
         """Unsubscribe from an information source by source_id."""
-        endpoint = f"{self.base_url}/information/unsubscribe"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/unsubscribe"
         data = {"information_ids": source_ids}
-        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=self.timeout)
+        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=timeout)
         self._handle_response(
             response,
             "Failed to unsubscribe from information source",
@@ -244,10 +261,10 @@ class BishengInformationClient(object):
 
     async def crawl_website(self, url: str) -> CrawlWebsiteResponse:
         """Crawl a website by URL."""
-        endpoint = f"{self.base_url}/information/crawl"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/crawl"
         data = {"url": url}
-        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=self.timeout)
+        response = await self.http_client.post(endpoint, body=data, headers=headers, timeout=timeout)
         response_body = self._handle_response(
             response,
             "Failed to crawl website",
@@ -258,12 +275,17 @@ class BishengInformationClient(object):
 
         return CrawlWebsiteResponse.model_validate(result)
 
-    def get_information_articles(self, information_id: str, return_information: bool = False,
-                                 min_create_time: int = None, page: int = 1, page_size: int = 20) \
-            -> InformationArticlesResponse:
+    def get_information_articles(
+        self,
+        information_id: str,
+        return_information: bool = False,
+        min_create_time: int = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> InformationArticlesResponse:
         """Get articles of an information source by source_id."""
-        endpoint = f"{self.base_url}/information/articles/{information_id}"
-        headers = {"X-API-Key": self.api_key}
+        base_url, headers, timeout = self._build_request_options()
+        endpoint = f"{base_url}/information/articles/{information_id}"
 
         params = {
             "return_information": return_information,
@@ -272,9 +294,12 @@ class BishengInformationClient(object):
         }
         if min_create_time:
             params["min_create_time"] = min_create_time
+        timeout_value = timeout.total if timeout else None
         with httpx.Client() as client:
-            response = client.get(endpoint, headers=headers, params=params)
+            response = client.get(endpoint, headers=headers, params=params, timeout=timeout_value)
         response_body = self._handle_response(response, "Failed to get information articles")
-        return InformationArticlesResponse(information=response_body.get("data", {}).get("information"),
-                                           articles=response_body.get("data", {}).get("articles", []),
-                                           total=response_body.get("totalCount", 0))
+        return InformationArticlesResponse(
+            information=response_body.get("data", {}).get("information"),
+            articles=response_body.get("data", {}).get("articles", []),
+            total=response_body.get("totalCount", 0),
+        )

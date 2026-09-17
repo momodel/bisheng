@@ -1,3 +1,4 @@
+import { Outlined } from "bisheng-icons";
 import { BookType, File, FileMinus, Heading, Image, Loader2, Table2 } from "lucide-react";
 import React from "react";
 
@@ -14,7 +15,10 @@ export type FileType =
     | 'bmp'
     | 'csv'
     | 'xls'
-    | 'xlsx';
+    | 'xlsx'
+    | 'wps'
+    | 'dps'
+    | 'et';
 
 const fileTypeColors: Record<FileType, string> = {
     pdf: 'bg-[#FA423E]',
@@ -31,7 +35,10 @@ const fileTypeColors: Record<FileType, string> = {
     bmp: 'bg-primary',
     csv: 'bg-[#06B84C]',
     xls: 'bg-[#06B84C]',
-    xlsx: 'bg-[#06B84C]'
+    xlsx: 'bg-[#06B84C]',
+    wps: 'bg-[#0285FF]',
+    dps: 'bg-[#FF9800]',
+    et: 'bg-[#06B84C]',
 };
 
 // 文件扩展名到图标组件的映射
@@ -81,6 +88,15 @@ const iconComponents: Record<FileType, any> = {
     </div>,
     xlsx: <div className={`${baseClassName} ${fileTypeColors.xlsx}`}>
         <Table2 />
+    </div>,
+    wps: <div className={`${baseClassName} ${fileTypeColors.wps}`}>
+        <BookType />
+    </div>,
+    dps: <div className={`${baseClassName} ${fileTypeColors.dps}`}>
+        <FileMinus />
+    </div>,
+    et: <div className={`${baseClassName} ${fileTypeColors.et}`}>
+        <Table2 />
     </div>
 };
 
@@ -120,3 +136,44 @@ const getSizeClass = (size: 'sm' | 'md' | 'lg') => {
 export const getFileTypebyFileName = (fileName: string) => {
     return fileName ? fileName.split('.').pop()?.toLocaleLowerCase() as FileType : '';
 }
+// Map an uploaded file's extension to a bisheng outlined file-type icon.
+// Anything not listed falls back to the generic Outlined.File icon.
+const FILE_TYPE_ICONS: Record<string, typeof Outlined.File> = {
+    // FileExcel
+    xls: Outlined.FileExcel,
+    xlsx: Outlined.FileExcel,
+    csv: Outlined.FileExcel,
+    et: Outlined.FileExcel,
+    // FilePdf
+    pdf: Outlined.FilePdf,
+    ppt: Outlined.FilePdf,
+    dps: Outlined.FilePdf,
+    // FileTxt
+    txt: Outlined.FileTxt,
+    // FileWord
+    doc: Outlined.FileWord,
+    docx: Outlined.FileWord,
+    wps: Outlined.FileWord,
+    // FileImage
+    png: Outlined.FileImage,
+    jpg: Outlined.FileImage,
+    jpeg: Outlined.FileImage,
+    bmp: Outlined.FileImage,
+    // FileEditing
+    md: Outlined.FileEditing,
+    // File (generic)
+    html: Outlined.File,
+};
+
+/** Outlined icon component for a file name, generic `File` when unmapped. */
+export const getFileTypeIcon = (fileName: string): typeof Outlined.File =>
+    FILE_TYPE_ICONS[getFileTypebyFileName(fileName)] ?? Outlined.File;
+
+// Whether an attachment should render as a picture. Judged by filename rather
+// than any stored MIME type: older messages don't carry one, and the upload
+// endpoints disagree on where they put it — the name is always there, and this
+// keeps the decision aligned with the icon shown for the same file.
+const IMAGE_FILE_TYPES = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
+
+export const isImageFileName = (fileName?: string): boolean =>
+    IMAGE_FILE_TYPES.has(getFileTypebyFileName(fileName ?? ''));

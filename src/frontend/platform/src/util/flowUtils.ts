@@ -1,9 +1,11 @@
+// @ts-strict-ignore
 import { getAssistantModelConfig, getLlmDefaultModel } from "@/controllers/API/finetune";
 import { copyReportTemplate } from "@/controllers/API/workflow";
 import { Node } from "@xyflow/react";
 import i18next from "i18next";
 import { cloneDeep } from "lodash-es";
 import { useEffect, useRef, useState } from "react";
+import { acceptsImages } from "@/util/fileAcceptUtils";
 
 // 节点名称自动命名
 export function autoNodeName(nodes: Node[], name: string): string {
@@ -25,9 +27,10 @@ export function initNode(node, nds, t) {
     const { id } = node;
     if (node.type === "tool") {
         if (node.is_preset) {
-            // 国际化工具节点
-            node.name = t(`tools.${node.tool_key}.name`, { ns: 'tool' })
-            node.description = t(`tools.${node.tool_key}.desc`, { ns: 'tool' })
+            // 国际化工具节点；defaultValue fallback 保留原始 name/description，
+            // 避免新增的 preset 工具未补 i18n 时显示 'tools.xxx.name' 字面 key。
+            node.name = t(`tools.${node.tool_key}.name`, { ns: 'tool', defaultValue: node.name || node.tool_key })
+            node.description = t(`tools.${node.tool_key}.desc`, { ns: 'tool', defaultValue: node.description || '' })
             return node;
         }
         return node;
@@ -66,9 +69,9 @@ export function initNode(node, nds, t) {
         });
     });
 
-    const newName = autoNodeName(nds, t(`node.${node.type}.name`))
+    const newName = autoNodeName(nds, t(`node.${node.type}.name`, { defaultValue: node.type }))
     node.name = newName
-    node.description = t(`node.${node.type}.description`)
+    node.description = t(`node.${node.type}.description`, { defaultValue: '' })
     return node;
 }
 
@@ -126,6 +129,14 @@ export function filterParamByinputCheck(group) {
         const parseMode = group.params.find(p => p.key === 'file_parse_mode')?.value;
         const acceptType = group.params.find(p => p.key === 'dialog_file_accept')?.value;
 
+        // F038 (单选 + 变量联动): file_parse_mode is a single string (extract_text /
+        // keep_raw); legacy map/array tolerated. Unified rule: path always, image by
+        // upload type, content when parsing.
+        const dialogModes = parseMode && typeof parseMode === 'object'
+            ? (Array.isArray(parseMode) ? parseMode : Object.values(parseMode))
+            : (parseMode ? [parseMode] : []);
+        const isExtract = dialogModes.includes('extract_text');
+
         return group.params.filter(param => {
             const { key } = param;
 
@@ -133,15 +144,15 @@ export function filterParamByinputCheck(group) {
                 return false;
             }
 
-            if (parseMode === 'extract_text' && ['dialog_image_files', 'dialog_file_paths'].includes(key)) {
+            // parsed text only when the strategy parses
+            if (key === 'dialog_files_content' && !isExtract) {
                 return false;
             }
-            if (parseMode === 'keep_raw' && key === 'dialog_files_content') {
+            // image variable only when the upload type allows images
+            if (key === 'dialog_image_files' && !acceptsImages(acceptType)) {
                 return false;
             }
-            if (acceptType === 'file' && key === 'dialog_image_files') {
-                return false;
-            }
+            // dialog_file_paths is always exposed (path 恒暴露)
 
             return true;
         });
@@ -333,7 +344,7 @@ export function importFlow() {
                 const currentfile = (e.target as HTMLInputElement).files[0];
                 currentfile.text().then(async (text) => {
                     try {
-                        let flow = JSON.parse(text);
+                        const flow = JSON.parse(text);
 
                         if (!flow || !Array.isArray(flow.nodes)) {
                             return reject("flow.nodes 不存在或不是数组");

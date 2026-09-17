@@ -1,22 +1,24 @@
+// @ts-strict-ignore
 import { QaIcon } from "@/components/bs-icons/knowledge";
 import { LoadIcon, LoadingIcon } from "@/components/bs-icons/loading";
 import { bsConfirm } from "@/components/bs-ui/alertDialog/useConfirm";
 import { Button } from "@/components/bs-ui/button";
+import { PermissionDialog } from "@/components/bs-comp/permission/PermissionDialog";
+import { useLazyResourceActions } from "@/components/bs-comp/permission/useResourceActions";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/bs-ui/dialog";
 import { Input, SearchInput, Textarea } from "@/components/bs-ui/input";
-import AutoPagination from "@/components/bs-ui/pagination/autoPagination";
+import LoadMore from "@/components/bs-comp/loadMore";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/bs-ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/bs-ui/table";
 import { useToast } from "@/components/bs-ui/toast/use-toast";
 import { QuestionTooltip } from "@/components/bs-ui/tooltip";
-import Tip from "@/components/bs-ui/tooltip/tip";
 import { userContext } from "@/contexts/userContext";
 import { copyQaDatabase, createFileLib, deleteFileLib, readFileLibDatabase, updateKnowledge } from "@/controllers/API";
 import { getKnowledgeModelConfig } from "@/controllers/API/finetune";
 import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
 import { ModelSelect } from "@/pages/ModelPage/manage/tabs/WorkbenchModel";
-import { useTable } from "@/util/hook";
-import { CircleAlert, Copy, Ellipsis, LoaderCircle, Settings, Trash2 } from "lucide-react";
+import { useInfiniteCursorTable } from "@/util/hook";
+import { CircleAlert, Copy, Ellipsis, LoaderCircle, Settings, Shield, Trash2 } from "lucide-react";
 import { useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -29,6 +31,19 @@ const enum KnowledgeBaseStatus {
     Copying = 2,
     Rebuilding = 3,
     Failed = 4
+}
+
+const KB_MANAGE_ACTION = 'manage_permission'
+const KB_ROW_ACTIONS = ['edit', 'delete', KB_MANAGE_ACTION]
+
+interface KnowledgeListRow {
+    id: string | number;
+    state: number;
+    actions?: string[];
+    name: string;
+    description?: string;
+    update_time: string;
+    user_name?: string;
 }
 
 function CreateModal({ datalist, open, onOpenChange, onLoadEnd, mode = 'create', currentLib = null }) {
@@ -278,11 +293,44 @@ export default function KnowledgeQa(params) {
     const [copyLoadingId, setCopyLoadingId] = useState<string | null>(null);
     const [selectOpenId, setSelectOpenId] = useState<string | null>(null);
     const [modalKey, setModalKey] = useState(0);
+    const [permDialogOpen, setPermDialogOpen] = useState(false);
+    const [permTarget, setPermTarget] = useState<{ id: string; name: string } | null>(null);
+    const {
+        actions: rowActions,
+        loading: rowActionsLoading,
+        load: loadRowActions,
+    } = useLazyResourceActions('knowledge_library', KB_ROW_ACTIONS);
 
-    const { page, pageSize, data: datalist, total, loading, setPage, search, reload } = useTable(
+    // F027: cursor-based infinite scroll; no `total` / `page` anymore.
+    const { data: datalist, loading, hasMore, search, reload, loadMore } = useInfiniteCursorTable(
         { cancelLoadingWhenReload: true },
-        (param) => readFileLibDatabase({ ...param, name: param.keyword, type: 1 })
+        (param) =>
+            readFileLibDatabase({ cursor: param.cursor, pageSize: param.pageSize, name: param.keyword, type: 1, action: 'visible' }),
     );
+    const visibleLibs = datalist;
+    const hasAction = (el: KnowledgeListRow, action: string) =>
+        Array.isArray(el.actions) && el.actions.includes(action);
+    const hasRowAction = (el: KnowledgeListRow, action: string) =>
+        rowActions[String(el.id)]?.includes(action) ?? false;
+    const canEdit = (el: KnowledgeListRow) =>
+        hasRowAction(el, 'edit');
+    const canDelete = (el: KnowledgeListRow) =>
+        hasRowAction(el, 'delete');
+    const canCreateLibrary =
+        user.role === 'admin' ||
+        (user.web_menu || []).includes('create_knowledge');
+    const canReadRow = (el: KnowledgeListRow) =>
+        hasAction(el, 'visible');
+    const canUseCopy = (el: KnowledgeListRow) => canCreateLibrary && canReadRow(el);
+    const canManageKb = (el: KnowledgeListRow) =>
+        hasRowAction(el, KB_MANAGE_ACTION);
+    const isLibraryBusy = (el: KnowledgeListRow) =>
+        [KnowledgeBaseStatus.Copying, KnowledgeBaseStatus.Unpublished].includes(el.state);
+    const canCopy = (el: KnowledgeListRow) =>
+        canUseCopy(el) && el.state === KnowledgeBaseStatus.Published;
+    const hasRowActions = (el: KnowledgeListRow) =>
+        canManageKb(el) || canCopy(el) || canEdit(el) || canDelete(el);
+    const showOperationsColumn = visibleLibs.length > 0;
 
     useEffect(() => {
         const todos = datalist.filter(lib => lib.state === KnowledgeBaseStatus.Copying);
@@ -325,21 +373,36 @@ export default function KnowledgeQa(params) {
         }
     };
 
+    // F027: persist only the tab type — the cursor token isn't restorable.
     const handleCachePage = () => {
-        window.LibPage = { page, type: 'qa' };
+        window.LibPage = { type: 'qa' };
     };
 
     useEffect(() => {
-        const _page = window.LibPage;
-        if (_page) {
-            setPage(_page.page);
-            delete window.LibPage;
-        } else {
-            setPage(1);
-        }
+        // F027: useInfiniteCursorTable auto-loads page 1; drop the marker.
+        delete window.LibPage;
     }, []);
 
     const { t } = useTranslation('knowledge');
+
+    const handleRowMenuOpenChange = async (el: KnowledgeListRow, isOpen: boolean) => {
+        const resourceId = String(el.id);
+        if (!isOpen) {
+            setSelectOpenId((current) => current === resourceId ? null : current);
+            return;
+        }
+        if (isLibraryBusy(el) || copyLoadingId === resourceId) return;
+
+        setSelectOpenId(resourceId);
+        const result = await loadRowActions(resourceId);
+        if (result.hasError) {
+            setSelectOpenId((current) => current === resourceId ? null : current);
+            toast({
+                variant: 'error',
+                description: t('error.checkFailed', { ns: 'permission' }),
+            });
+        }
+    };
 
     const handleCopy = async (elem) => {
         const newName = `${elem.name}${t('copySuffix')}`;
@@ -349,7 +412,7 @@ export default function KnowledgeQa(params) {
             return;
         }
 
-        setCopyLoadingId(elem.id);
+        setCopyLoadingId(String(elem.id));
         doing[elem.id] = true;
 
         try {
@@ -370,10 +433,10 @@ export default function KnowledgeQa(params) {
                     <LoadingIcon />
                 </div>
             )}
-            <div className="h-[calc(100vh-128px)] overflow-y-auto pb-20">
+            <div className="h-[calc(100vh-128px-var(--license-banner-h,0px))] overflow-y-auto pb-20">
                 <div className="flex justify-end gap-4 items-center absolute right-0 top-[-44px]">
                     <SearchInput placeholder={t('lib.searchPlaceholder', { ns: 'bs' })} onChange={(e) => search(e.target.value)} />
-                    <Button className="px-8 text-[#FFFFFF]" onClick={() => setOpen(true)}>{t('create', { ns: 'bs' })}</Button>
+                    {canCreateLibrary && <Button className="px-8 text-[#FFFFFF]" onClick={() => setOpen(true)}>{t('create', { ns: 'bs' })}</Button>}
                 </div>
                 <Table>
                     <TableHeader>
@@ -381,14 +444,17 @@ export default function KnowledgeQa(params) {
                             <TableHead>{t('lib.libraryName', { ns: 'bs' })}</TableHead>
                             <TableHead>{t('updateTime')}</TableHead>
                             <TableHead>{t('lib.createUser', { ns: 'bs' })}</TableHead>
-                            <TableHead className="text-right">{t('operations')}</TableHead>
+                            {showOperationsColumn && (
+                                <TableHead className="text-right">{t('operations')}</TableHead>
+                            )}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {datalist.map((el: any) => (
+                        {visibleLibs.map((el: KnowledgeListRow) => (
                             <TableRow
                                 key={el.id}
                                 onClick={() => {
+                                    if (!canReadRow(el)) return;
                                     if ([KnowledgeBaseStatus.Copying, KnowledgeBaseStatus.Unpublished].includes(el.state)) return;
                                     window.libname = [el.name, el.description];
                                     navigate(`/filelib/qalib/${el.id}`);
@@ -397,16 +463,16 @@ export default function KnowledgeQa(params) {
                             >
                                 <TableCell className="font-medium max-w-[280px]">
                                     <div className="flex items-center gap-2">
-                                        <div className="flex items-center justify-center size-12 text-white rounded-[4px] w-[40px] h-[40px]">
-                                            <QaIcon className="text-primary size-10" />
-                                        </div>
-                                        <div>
-                                            <div className="truncate max-w-[500px] w-[264px] text-[14px] font-medium pt-2">
-                                                {el.name}
+                                            <div className="flex items-center justify-center size-12 text-white rounded-[4px] w-[40px] h-[40px]">
+                                                <QaIcon className="text-primary size-10" />
                                             </div>
-                                            <QuestionTooltip
-                                                content={el.description || ''}
-                                                error={false}
+                                            <div>
+                                                <div className="truncate max-w-[500px] w-[264px] text-[14px] font-medium pt-2 flex items-center gap-2">
+                                                    {el.name}
+                                                </div>
+                                                <QuestionTooltip
+                                                    content={el.description || ''}
+                                                    error={false}
                                                 className="w-full text-start"
                                             >
                                                 <div className="truncate max-w-[400px] text-[12px] text-[#5A5A5A] pt-1">
@@ -422,37 +488,35 @@ export default function KnowledgeQa(params) {
                                 <TableCell className="max-w-[300px] break-all">
                                     <div className="truncate-multiline text-[#5A5A5A]">{el.user_name || '--'}</div>
                                 </TableCell>
-                                <TableCell className="text-right">
+                                {showOperationsColumn && <TableCell className="text-right">
                                     <div className="flex items-center justify-end gap-2">
-                                        <Select
+                                        {(isLibraryBusy(el) || canReadRow(el)) && <Select
                                             key={`${el.id}-${modalKey}`}
-                                            open={selectOpenId === el.id}
-                                            onOpenChange={(isOpen) => {
-                                                if (el.state === 2 || el.state === 0) return;
-                                                if (copyLoadingId !== el.id) {
-                                                    setSelectOpenId(isOpen ? el.id : null);
-                                                } else if (!isOpen) {
-                                                    setSelectOpenId(null);
-                                                }
-                                            }}
+                                            open={selectOpenId === String(el.id)}
+                                            onOpenChange={(isOpen) => void handleRowMenuOpenChange(el, isOpen)}
                                             onValueChange={(selectedValue) => {
                                                 setSelectOpenId(null);
                                                 switch (selectedValue) {
+                                                    case 'permission':
+                                                        setPermTarget({ id: String(el.id), name: el.name });
+                                                        setPermDialogOpen(true);
+                                                        setModalKey(prev => prev + 1);
+                                                        break;
                                                     case 'copy':
-                                                        el.state === KnowledgeBaseStatus.Published && handleCopy(el);
+                                                        canCopy(el) && handleCopy(el);
                                                         break;
                                                     case 'set':
-                                                        handleOpenSettings(el);
+                                                        canEdit(el) && handleOpenSettings(el);
                                                         break;
                                                     case 'delete':
-                                                        (el.copiable || user.role === 'admin') && handleDelete(el.id);
+                                                        canDelete(el) && handleDelete(el.id);
                                                         break;
                                                 }
                                             }}
                                         >
                                             <SelectTrigger
                                                 showIcon={false}
-                                                disabled={copyLoadingId === el.id}
+                                                disabled={copyLoadingId === String(el.id)}
                                                 onClick={(e) => e.stopPropagation()}
                                                 className="size-10 px-2 bg-transparent border-none shadow-none hover:bg-gray-300 flex items-center justify-center duration-200 relative"
                                             >
@@ -471,22 +535,37 @@ export default function KnowledgeQa(params) {
                                                 onClick={(e) => e.stopPropagation()}
                                                 className="z-50 overflow-visible"
                                             >
-                                                <Tip content={!el.copiable && t('noPermission')} side='top'>
+                                                {rowActionsLoading[String(el.id)] && (
+                                                    <SelectItem showIcon={false} value="loading" disabled>
+                                                        <div className="flex gap-2 items-center">
+                                                            <LoaderCircle className="w-4 h-4 animate-spin" />
+                                                            {t('knowledgeRowActions.loading', { ns: 'permission' })}
+                                                        </div>
+                                                    </SelectItem>
+                                                )}
+                                                {!rowActionsLoading[String(el.id)] && canManageKb(el) && (
+                                                    <SelectItem showIcon={false} value="permission">
+                                                        <div className="flex gap-2 items-center">
+                                                            <Shield className="w-4 h-4" />
+                                                            {t('managePermission', { ns: 'permission' })}
+                                                        </div>
+                                                    </SelectItem>
+                                                )}
+                                                {!rowActionsLoading[String(el.id)] && canCopy(el) && (
                                                     <SelectItem
                                                         showIcon={false}
                                                         value="copy"
-                                                        disabled={!(el.copiable || user.role === 'admin') || el.state !== KnowledgeBaseStatus.Published || copyLoadingId === el.id}
+                                                        disabled={copyLoadingId === String(el.id)}
                                                     >
                                                         <div className="flex gap-2 items-center">
                                                             <Copy className="w-4 h-4" />
                                                             {t('lib.copy', { ns: 'bs' })}
                                                         </div>
                                                     </SelectItem>
-                                                </Tip>
-                                                <Tip content={!el.copiable && t('noPermission')} side='top'>
+                                                )}
+                                                {!rowActionsLoading[String(el.id)] && canEdit(el) && (
                                                     <SelectItem
                                                         value="set"
-                                                        disabled={!el.copiable}
                                                         showIcon={false}
                                                     >
                                                         <div className="flex gap-2 items-center">
@@ -494,37 +573,38 @@ export default function KnowledgeQa(params) {
                                                             {t('setting')}
                                                         </div>
                                                     </SelectItem>
-                                                </Tip>
-                                                <Tip content={!el.copiable && t('noPermission')} side='top'>
+                                                )}
+                                                {!rowActionsLoading[String(el.id)] && canDelete(el) && (
                                                     <SelectItem
                                                         value="delete"
                                                         showIcon={false}
-                                                        disabled={!(el.copiable || user.role === 'admin')}
                                                     >
                                                         <div className="flex gap-2 items-center">
                                                             <Trash2 className="w-4 h-4" />
                                                             {t('delete')}
                                                         </div>
                                                     </SelectItem>
-                                                </Tip>
+                                                )}
+                                                {!rowActionsLoading[String(el.id)] && !hasRowActions(el) && (
+                                                    <SelectItem showIcon={false} value="empty" disabled>
+                                                        {t('knowledgeRowActions.empty', { ns: 'permission' })}
+                                                    </SelectItem>
+                                                )}
                                             </SelectContent>
-                                        </Select>
+                                        </Select>}
                                     </div>
-                                </TableCell>
+                                </TableCell>}
                             </TableRow>
                         ))}
                     </TableBody>
                 </Table>
+                {/* F027: infinite-scroll trigger lives INSIDE the
+                    `overflow-y-auto` scroll container. */}
+                {hasMore && <LoadMore onScrollLoad={loadMore} />}
             </div>
             <div className="bisheng-table-footer px-6 bg-background-login">
-                <p className="desc">{t('lib.libraryCollection', { ns: 'bs' })}</p>
-                <div>
-                    <AutoPagination
-                        page={page}
-                        pageSize={pageSize}
-                        total={total}
-                        onChange={(newPage) => setPage(newPage)}
-                    />
+                <div className="flex items-center gap-2">
+                    <p className="desc">{t('lib.libraryCollection', { ns: 'bs' })}</p>
                 </div>
             </div>
 
@@ -547,6 +627,16 @@ export default function KnowledgeQa(params) {
                     onLoadEnd={reload}
                     mode="edit"
                     currentLib={currentSettingLib}
+                />
+            )}
+
+            {permTarget && (
+                <PermissionDialog
+                    open={permDialogOpen}
+                    onOpenChange={setPermDialogOpen}
+                    resourceType="knowledge_library"
+                    resourceId={permTarget.id}
+                    resourceName={permTarget.name}
                 />
             )}
         </div>

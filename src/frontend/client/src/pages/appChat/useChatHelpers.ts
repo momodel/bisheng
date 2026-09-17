@@ -8,9 +8,21 @@ import { Chat } from "~/@types/chat"
 import { baseMsgItem } from "~/api/apps"
 import { formatDate, generateUUID } from "~/utils"
 import { FLOW_TYPES } from "."
-import { SkillMethod } from "./appUtils/skillMethod"
-import { bishengConfState, chatIdState, chatsState, currentChatState, currentRunningState, runningState } from "./store/atoms"
+import { runLogsTypes, SkillMethod } from "./appUtils/skillMethod"
+import { bishengConfState, chatApiVersionState, chatIdState, chatsState, currentChatState, currentRunningState, runningState } from "./store/atoms"
 import { emitAreaTextEvent, EVENT_TYPE } from "./useAreaText"
+
+// Attachments hung on a sent message. Producers disagree on the field names
+// (the uploader says `name`/`filepath`, the websocket payload says
+// `file_name`/`file_url`), so every alias stays optional and readers fall back.
+type SentMessageFile = {
+    file_id?: string
+    file_name?: string
+    file_url?: string
+    name?: string
+    filepath?: string
+    file_path?: string
+}
 
 export default function useChatHelpers() {
     const chatState = useRecoilValue(currentChatState)
@@ -19,6 +31,7 @@ export default function useChatHelpers() {
     const [_, setChats] = useRecoilState(chatsState)
     const [__, setRunningState] = useRecoilState(runningState)
     const [chatId] = useRecoilState(chatIdState)
+    const apiVersion = useRecoilValue(chatApiVersionState)
 
     const wsUrl = useMemo(() => {
         if (!chatState) return ""
@@ -27,15 +40,16 @@ export default function useChatHelpers() {
         const type = Number(flow.flow_type)
         const host = bishengConfig?.websocket_url || window.location.host;
         const basePath = __APP_ENV__.BASE_URL;
+        const v = apiVersion;
 
         const routeConfig = {
-            [FLOW_TYPES.SKILL]: `${host}${basePath}/api/v1/chat/${flow.id}?type=L1`,
-            [FLOW_TYPES.ASSISTANT]: `${window.location.host}${basePath}/api/v1/assistant/chat/${flow.id}`,
-            [FLOW_TYPES.WORK_FLOW]: `${host}${basePath}/api/v1/workflow/chat/${flow.id}?chat_id=${chatId}`
+            [FLOW_TYPES.SKILL]: `${host}${basePath}/api/${v}/chat/${flow.id}?type=L1`,
+            [FLOW_TYPES.ASSISTANT]: `${window.location.host}${basePath}/api/${v}/assistant/chat/${flow.id}`,
+            [FLOW_TYPES.WORK_FLOW]: `${host}${basePath}/api/${v}/workflow/chat/${flow.id}?chat_id=${chatId}`
         };
 
         return routeConfig[type] || '';
-    }, [chatState, chatId, bishengConfig])
+    }, [chatState, chatId, bishengConfig, apiVersion])
 
     const appLost = useMemo(() => {
         return runState?.error?.code
@@ -183,6 +197,7 @@ export default function useChatHelpers() {
                         receiver,
                         type,
                         source,
+                        citations,
                         user_id,
                         reasoning_log,
                         thought
@@ -201,14 +216,18 @@ export default function useChatHelpers() {
                             chat_id,
                             id: messageId,
                             files: _files.map(el => ({
-                                // 兼容
                                 file_name: el.file_name || el.name,
-                                file_url: el.file_url || el.url || el.path
+                                file_url: el.file_url || el.url || el.path || el.filepath,
+                                filepath: el.filepath || el.file_path || el.file_url || el.url || el.path,
+                                // Keep the id: it's what an image attachment is
+                                // looked up by when its link is re-issued.
+                                file_id: el.file_id,
                             })),
                             is_bot,
                             message: msg,
                             receiver,
                             source,
+                            citations,
                             user_id,
                             liked: !!liked,
                             end: type === "over",
@@ -233,6 +252,7 @@ export default function useChatHelpers() {
                     if (currentMessageIndex === -1) {
                         // Create new message
                         const { category, flow_id, chat_id, files, is_bot, extra, liked, receiver, type, source, user_id } = data
+                        const { citations } = data
                         const message = data.message.msg
                         const reasoning_log = reasoning_content || ""
 
@@ -249,6 +269,7 @@ export default function useChatHelpers() {
                                 message,
                                 receiver,
                                 source,
+                                citations,
                                 user_id,
                                 liked: !!liked,
                                 end: type === "over",
@@ -265,13 +286,16 @@ export default function useChatHelpers() {
                         const updatedMessages = [...messages]
                         updatedMessages[currentMessageIndex] = {
                             ...currentMsg,
-                            id: data.type === "end" ? data.message_id : currentMsg.id,
+                            // On end, prefer the real DB message_id; if the backend omits it,
+                            // fall back to the existing temp id rather than wiping it to undefined.
+                            id: data.type === "end" ? (data.message_id || currentMsg.id) : currentMsg.id,
                             message: data.type === "end" ? data.message.msg : currentMsg.message + data.message.msg,
                             reasoning_log: reasoning_content
                                 ? currentMsg.reasoning_log + reasoning_content
                                 : currentMsg.reasoning_log,
                             create_time: formatDate(new Date(), "yyyy-MM-ddTHH:mm:ss"),
                             source: data.source,
+                            citations: data.citations ?? currentMsg.citations,
                             end: data.type === "end",
                             extra: data.extra,
                         }
@@ -302,13 +326,47 @@ export default function useChatHelpers() {
         skillStreamMsg: (chatid: string, data: any) => {
             setChats((prev) =>
                 updateChatMessages(prev, chatid, (messages) => {
-                    return SkillMethod.updateStreamMessage(data, chatid, messages,
+                    const next = SkillMethod.updateStreamMessage(data, chatid, messages,
                         data.type === 'end_cover' && data.category === 'anwser'
                     )
+                    // Safety net: when the backend emits a real DB message_id (typically on
+                    // end / end_cover for `answer`), force-stamp it onto the latest non-runLog
+                    // bot message that still carries a temp id. This guards against the
+                    // cover/pop branches inside updateStreamMessage swallowing the id.
+                    const dbId = data?.message_id
+                    if (dbId && !['tool', 'flow', 'knowledge'].includes(data.category)) {
+                        for (let i = next.length - 1; i >= 0; i--) {
+                            const m = next[i]
+                            if (!m?.is_bot) break
+                            if (['tool', 'flow', 'knowledge'].includes(m.category)) continue
+                            const idStr = String(m.id ?? '')
+                            const idMissingOrTemp =
+                                !m.id || idStr.startsWith('tmp-') || idStr.startsWith('u-')
+                            if (idMissingOrTemp) {
+                                m.id = dbId
+                            }
+                            break
+                        }
+                    }
+                    return next
                 })
             )
         },
         skillCloseMsg: () => {
+            // A tool card only closes when its `end` frame arrives. Lose one — a
+            // serialization failure, a dropped socket — and it spins forever with
+            // nothing to recover it: the round is over and nothing was persisted.
+            // Settle what is still open, marked interrupted rather than wearing a
+            // success tick it never earned.
+            setChats((prev) =>
+                updateChatMessages(prev, chatId, (messages) =>
+                    messages.map((msg) =>
+                        runLogsTypes.includes(msg.category) && !msg.end
+                            ? { ...msg, end: true, interrupted: true }
+                            : msg
+                    )
+                )
+            )
             setRunningState((prev) => {
                 return {
                     ...prev,
@@ -355,7 +413,9 @@ export default function useChatHelpers() {
                 }),
             )
         },
-        createSendMsg: (msg: string) => {
+        // `files` keeps the attachments as data rather than only as filenames
+        // glued onto the text, so an image can render as an image.
+        createSendMsg: (msg: string, files: SentMessageFile[] = []) => {
             setChats((prev) =>
                 updateChatMessages(prev, chatId, (messages) => [
                     ...messages,
@@ -364,6 +424,7 @@ export default function useChatHelpers() {
                         category: "question",
                         id: 'u-' + generateUUID(8),
                         message: msg,
+                        files,
                         create_time: formatDate(new Date(), "yyyy-MM-ddTHH:mm:ss"),
                     },
                 ]),

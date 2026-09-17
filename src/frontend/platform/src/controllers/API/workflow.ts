@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { WorkFlow } from "@/types/flow";
 import axios from "../request";
 
@@ -104,6 +105,13 @@ export async function getWorkFlowVersions(flow_id): Promise<{ data: any[], total
     });
 }
 
+/**
+ * 切换工作流当前版本.
+ */
+export async function changeWorkflowCurrentVersion({ flow_id, version_id }: { flow_id: string, version_id: number }) {
+    return await axios.post(`/api/v1/workflow/change_version?flow_id=${flow_id}&version_id=${version_id}`);
+}
+
 
 /** 上线工作流 & 修改信息 
  * status: 2 上线 1 下线
@@ -137,6 +145,17 @@ export const runWorkflowNodeApi = async ({ node_input, data, workflow_id }): Pro
             id: data.id,
             data,
         }
+    });
+}
+
+/**
+ * 手动保存报告模板
+ * 只是让文档服务把当前编辑内容立刻落盘，实际写入仍由文档服务回调后端完成
+ */
+export const saveWorkflowReportTemplate = async (versionKey: string, flowId: string): Promise<any> => {
+    return await axios.post(`/api/v1/workflow/report/save`, {
+        version_key: versionKey,
+        workflow_id: flowId
     });
 }
 
@@ -479,7 +498,7 @@ const workflowTemplate = [
                             2
                         ],
                         "step": 0.1,
-                        "value": 0.7
+                        "value": 1
                     }
                 ]
             },
@@ -589,7 +608,7 @@ const workflowTemplate = [
                             2
                         ],
                         "step": 0.1,
-                        "value": 0.7
+                        "value": 1
                     }
                 ]
             },
@@ -650,6 +669,15 @@ const workflowTemplate = [
                             "type": "knowledge",
                             "value": []
                         }
+                    },
+                    {
+                        // F041: 用户知识库权限校验 — default OFF; ON gates knowledge-space
+                        // retrieval by the runtime user's view_file, OFF by the config author's.
+                        "key": "user_auth",
+                        "label": "true",
+                        "type": "switch",
+                        "value": false,
+                        "help": "true"
                     }
                 ]
             },
@@ -845,7 +873,7 @@ const workflowTemplate = [
                             2
                         ],
                         "step": 0.1,
-                        "value": 0.7
+                        "value": 1
                     }
                 ]
             },

@@ -1,7 +1,7 @@
 import { useLocalize } from "~/hooks";
-import { LogOut, MoreHorizontal, Pin, PinOff, Settings, Users } from "lucide-react";
+import { LogOut, MoreHorizontal, Pin, PinOff, Settings } from "lucide-react";
 import { useState } from "react";
-import { Channel, ChannelRole } from "~/api/channels";
+import { canDeleteChannel, canEditChannelSettings, canManageChannelPermissions, type Channel } from "~/api/channels";
 import { NotificationSeverity } from "~/common";
 import {
     DropdownMenu,
@@ -19,11 +19,16 @@ import {
     sidebarListMoreMenuLabelClassName,
 } from "~/components/SidebarListMoreMenu";
 import { useConfirm, useToastContext } from "~/Providers";
-import { getFullWidthLength } from "~/utils";
+import { cn, getFullWidthLength } from "~/utils";
 import { ChannelPinIcon } from "~/components/icons/channels";
 import ClosedIcon from "~/components/ui/icon/ClosedIcon";
 import { SpaceNotebookIcon } from "~/components/icons/SpaceNotebookIcon";
 
+// NOTE (dead code, kept intentionally): ChannelItem is only used by ChannelSidebar,
+// which is currently unreachable (see ChannelSidebar.tsx). Its per-row ⋯ menu is the
+// only place that reads `channel.actions` for 频道设置/解散 — which is why the
+// my_channels list endpoint no longer returns those actions (resolved lazily via the
+// ChannelActionsMenu settings button instead). Left in place per request.
 interface ChannelItemProps {
     channel: Channel;
     isActive: boolean;
@@ -33,7 +38,6 @@ interface ChannelItemProps {
     onDelete: (id: string) => void;
     onUnsubscribe: (id: string) => void;
     onPin: (id: string, pinned: boolean, type: "created" | "subscribed") => void;
-    onManageMembers: (channel: Channel) => void;
     onChannelSettings: (channel: Channel) => void;
 }
 
@@ -46,7 +50,6 @@ export default function ChannelItem({
     onDelete,
     onUnsubscribe,
     onPin,
-    onManageMembers,
     onChannelSettings
 }: ChannelItemProps) {
     const localize = useLocalize();
@@ -55,11 +58,16 @@ export default function ChannelItem({
     const { showToast } = useToastContext();
     const confirm = useConfirm()
 
+    // Dissolve uses the concrete delete action. Unsubscribe remains an
+    // independent business operation for subscribed-list entries.
+    const canDissolve = canDeleteChannel(channel.actions);
+    const canUnsubscribe = type === "subscribed";
+
     const rename = (e) => {
         const newName = e.target.value.trim();
         setIsEditing(false);
         if (!newName) return
-        if (getFullWidthLength(newName) > 10) {
+        if (getFullWidthLength(newName) > 50) {
             return showToast({
                 message: localize("com_subscription.max_10_characters"),
                 severity: NotificationSeverity.ERROR
@@ -73,8 +81,8 @@ export default function ChannelItem({
     return (
         <div
             className={`group flex items-center justify-between h-8 px-3 py-1.5 rounded-lg cursor-pointer border ${isActive
-                ? "bg-[#E6EDFC] border-primary shadow-sm"
-                : "border-transparent hover:bg-[#F7F7F7]"
+                ? "bg-blue-500/[0.07] border-primary shadow-sm"
+                : "border-transparent hover:bg-fill-1"
                 }`}
             style={{
                 transitionProperty: 'background-color',
@@ -104,7 +112,7 @@ export default function ChannelItem({
                     />
                 ) : (
                     <div className="flex items-center gap-1 flex-1 min-w-0">
-                        <span onDoubleClick={() => type === "created" && setIsEditing(true)} className="text-[14px] truncate text-[#1d2129]">
+                        <span onDoubleClick={() => type === "created" && setIsEditing(true)} className="text-[14px] truncate text-text-1">
                             {channel.name}
                         </span>
                         {channel.isPinned && (
@@ -114,42 +122,52 @@ export default function ChannelItem({
                 )}
             </div>
 
-            {/* 右侧区域 */}
-            <div className="flex items-center justify-end flex-shrink-0 w-8 h-5 relative">
-                {/* 1. 徽标：非菜单打开 且 非Hover 时可见 */}
+            {/* 右侧区域：窄屏为徽标在左/更多在右；宽屏为徽标与更多叠放。仅粗指针设备上更多按钮常驻，窄屏 PC 仍 hover 显示 */}
+            <div
+                className={cn(
+                    "relative flex flex-shrink-0 items-center justify-end",
+                    "coarse-pointer:min-w-0 coarse-pointer:gap-1.5 coarse-pointer:pl-1",
+                    "fine-pointer:h-5 fine-pointer:w-8",
+                )}
+            >
                 {channel.unreadCount > 0 && (
-                    <span className={`
-                        absolute right-0 flex items-center justify-center
-                        text-[10px] px-1.5 py-[1px] rounded-md font-medium bg-[#335CFF33]/20 text-primary
-                        ${menuOpen ? "opacity-0" : "group-hover:opacity-0"}
-                    `}
+                    <span
+                        className={cn(
+                            "flex items-center justify-center rounded-md bg-blue-500/20 px-1.5 py-[1px] text-caption-sm font-medium text-primary",
+                            "coarse-pointer:relative coarse-pointer:shrink-0 coarse-pointer:opacity-100",
+                            "fine-pointer:absolute fine-pointer:right-0",
+                            menuOpen
+                                ? "opacity-0"
+                                : "coarse-pointer:opacity-100 fine-pointer:group-hover:opacity-0",
+                        )}
                         style={{
-                            transitionProperty: 'background-color',
-                            transitionDuration: '350ms',
-                            // transitionDelay: '100ms',
-                            transitionTimingFunction: 'ease-in-out'
+                            transitionProperty: "opacity, background-color",
+                            transitionDuration: "250ms",
+                            transitionTimingFunction: "ease-in-out",
                         }}
                     >
                         {channel.unreadCount}
                     </span>
                 )}
 
-                {/* 2. 操作按钮：菜单打开 或 Hover 时可见 */}
                 <DropdownMenu onOpenChange={setMenuOpen}>
                     <DropdownMenuTrigger asChild>
                         <button
-                            className={`
-                                absolute right-0 flex items-center justify-center p-1 rounded-md hover:bg-black/5 outline-none
-                                ${menuOpen ? "opacity-100 z-10" : "opacity-0 group-hover:opacity-100 z-10"}
-                            `}
+                            type="button"
+                            className={cn(
+                                "z-10 flex size-7 shrink-0 items-center justify-center rounded-md outline-none hover:bg-black/5",
+                                menuOpen && "opacity-100",
+                                !menuOpen &&
+                                "coarse-pointer:opacity-100 fine-pointer:opacity-0 fine-pointer:group-hover:opacity-100",
+                            )}
                             onClick={(e) => e.stopPropagation()}
                         >
-                            <MoreHorizontal className="size-4 text-[#4e5969]" />
+                            <MoreHorizontal className="size-4 text-text-2" />
                         </button>
                     </DropdownMenuTrigger>
 
                     <SidebarListMoreMenuContent onClick={(e) => e.stopPropagation()}>
-                        {type === "created" && (
+                        {(canEditChannelSettings(channel.actions) || canManageChannelPermissions(channel.actions)) && (
                             <DropdownMenuItem
                                 className={sidebarListMoreMenuItemClassName}
                                 onClick={() => onChannelSettings(channel)}
@@ -157,17 +175,6 @@ export default function ChannelItem({
                                 <Settings className={sidebarListMoreMenuIconClassName} />
                                 <span className={sidebarListMoreMenuLabelClassName}>
                                     {localize("com_subscription.channel_settings")}
-                                </span>
-                            </DropdownMenuItem>
-                        )}
-                        {[ChannelRole.CREATOR, ChannelRole.ADMIN].includes(channel.role) && (
-                            <DropdownMenuItem
-                                className={sidebarListMoreMenuItemClassName}
-                                onClick={() => onManageMembers(channel)}
-                            >
-                                <Users className={sidebarListMoreMenuIconClassName} />
-                                <span className={sidebarListMoreMenuLabelClassName}>
-                                    {localize("com_subscription.member_management")}
                                 </span>
                             </DropdownMenuItem>
                         )}
@@ -187,32 +194,53 @@ export default function ChannelItem({
                                 </>
                             )}
                         </DropdownMenuItem>
-                        <SidebarListMoreMenuDivider />
+                        {(canDissolve || canUnsubscribe) && <SidebarListMoreMenuDivider />}
 
-                        <DropdownMenuItem
-                            onClick={async () => {
-                                const ok = await confirm({
-                                    title: localize("com_subscription.prompt_tip"),
-                                    description: type === "created" ? localize("com_subscription.confirm_delete_channel_for_all") : localize("com_subscription.confirm_unsubscribe_channel_and_subs"),
-                                    confirmText: localize("com_subscription.confirm"),
-                                    cancelText: localize("com_subscription.cancel")
-                                })
+                        {canDissolve && (
+                            <DropdownMenuItem
+                                onClick={async () => {
+                                    const ok = await confirm({
+                                        title: localize("com_subscription.prompt_tip"),
+                                        description: localize("com_subscription.confirm_delete_channel_for_all"),
+                                        confirmText: localize("com_subscription.confirm"),
+                                        cancelText: localize("com_subscription.cancel")
+                                    })
 
-                                if (ok) {
-                                    type === "created" ? onDelete(channel.id) : onUnsubscribe(channel.id);
-                                }
-                            }}
-                            className={sidebarListMoreMenuDangerItemClassName}
-                        >
-                            {type === "created" ? (
+                                    if (ok) {
+                                        onDelete(channel.id);
+                                    }
+                                }}
+                                className={sidebarListMoreMenuDangerItemClassName}
+                            >
                                 <ClosedIcon className={sidebarListMoreMenuDangerIconClassName} />
-                            ) : (
+                                <span className={sidebarListMoreMenuDangerLabelClassName}>
+                                    {localize("com_subscription.dissolve_channel")}
+                                </span>
+                            </DropdownMenuItem>
+                        )}
+
+                        {canUnsubscribe && (
+                            <DropdownMenuItem
+                                onClick={async () => {
+                                    const ok = await confirm({
+                                        title: localize("com_subscription.prompt_tip"),
+                                        description: localize("com_subscription.confirm_unsubscribe_channel_and_subs"),
+                                        confirmText: localize("com_subscription.confirm"),
+                                        cancelText: localize("com_subscription.cancel")
+                                    })
+
+                                    if (ok) {
+                                        onUnsubscribe(channel.id);
+                                    }
+                                }}
+                                className={sidebarListMoreMenuDangerItemClassName}
+                            >
                                 <LogOut className={sidebarListMoreMenuDangerIconClassName} />
-                            )}
-                            <span className={sidebarListMoreMenuDangerLabelClassName}>
-                                {type === "created" ? localize("com_subscription.dissolve_channel") : localize("com_subscription.unsubscribe")}
-                            </span>
-                        </DropdownMenuItem>
+                                <span className={sidebarListMoreMenuDangerLabelClassName}>
+                                    {localize("com_subscription.unsubscribe")}
+                                </span>
+                            </DropdownMenuItem>
+                        )}
                     </SidebarListMoreMenuContent>
                 </DropdownMenu>
             </div>

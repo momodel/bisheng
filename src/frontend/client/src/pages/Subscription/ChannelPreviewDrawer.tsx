@@ -1,8 +1,9 @@
-import { useLocalize } from "~/hooks";
+import { useLocalize, useScrollRevealRef } from "~/hooks";
+import { NoPermissionIllustration } from "~/components/illustrations";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRight } from "lucide-react";
+import { X } from "lucide-react";
 import {
     type ChannelDetailResponse,
     getArticlesApi,
@@ -37,9 +38,12 @@ interface ChannelPreviewDrawerProps {
     onSubscriptionChanged?: () => void;
 }
 
-type SubscribeStatus = "none" | "subscribed" | "pending" | "rejected";
+/** `rejected` is deliberately absent: a rejected application can be resubmitted,
+ *  so it collapses into "none" (the plain 订阅 button). */
+type SubscribeStatus = "none" | "subscribed" | "pending";
 
 export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscriptionChanged }: ChannelPreviewDrawerProps) {
+    const previewListScrollRevealRef = useScrollRevealRef<HTMLDivElement>();
     const localize = useLocalize();
     const navigate = useNavigate();
     const { showToast } = useToastContext();
@@ -152,12 +156,7 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
     // Handle subscribe action
     const handleSubscribe = async () => {
         if (!channelId || subscribing) return;
-        if (subscribeStatus === "subscribed" || subscribeStatus === "pending" || subscribeStatus === "rejected") return;
-        if (
-            String(channelDetail?.subscription_status ?? "").toLowerCase() === "rejected"
-        ) {
-            return;
-        }
+        if (subscribeStatus === "subscribed" || subscribeStatus === "pending") return;
 
         setSubscribing(true);
         try {
@@ -205,9 +204,6 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
         if (status === "pending") {
             return { text: localize("com_subscription.applying"), disabled: true, variant: "secondary" as const };
         }
-        if (status === "rejected") {
-            return { text: localize("rejected") || "已驳回", disabled: true, variant: "secondary" as const };
-        }
         return { text: localize("com_subscription.subscribe"), disabled: false, variant: "outline" as const };
     };
     const isCreatorView =
@@ -220,16 +216,20 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
         const sub = String(channelDetail?.subscription_status ?? "").toLowerCase();
         if (sub === "subscribed") return "subscribed";
         if (sub === "pending") return "pending";
-        if (sub === "rejected") return "rejected";
+        // "rejected" included: the user may apply again, so show the 订阅 button.
         return "none";
     })();
     const btnConfig = getButtonConfig(effectiveSubscribeStatus);
 
-    // 需审核频道：非创建者且未订阅/未通过时才隐藏文章列表；创建者需可查看文章
+    // REVIEW channels hide the article list until the viewer subscribes and is
+    // approved. F048 `visible` is the sole permission-derived content gate.
+    const canViewChannelContent =
+        channelDetail?.actions?.includes("visible") ?? false;
     const hideArticles =
         channelDetail?.visibility === "review" &&
         !isCreatorView &&
-        effectiveSubscribeStatus !== "subscribed";
+        effectiveSubscribeStatus !== "subscribed" &&
+        !canViewChannelContent;
 
     // Handle error — channel not found, inaccessible, or articles cannot be loaded
     useEffect(() => {
@@ -244,36 +244,37 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
         <Sheet open={open} onOpenChange={onOpenChange}>
             <SheetContent
                 side="right"
-                className="w-[1000px] sm:max-w-[1000px] p-0 px-16 flex flex-col h-full min-h-0 overflow-hidden"
+                className="flex h-full min-h-0 w-full flex-col overflow-hidden p-4 sm:max-w-[1000px]"
                 hideClose
                 onCloseAutoFocus={(e) => e.preventDefault()}
             >
-                <button
-                    type="button"
-                    aria-label="收起抽屉"
-                    onClick={() => onOpenChange(false)}
-                    className="absolute left-1 top-1/2 -translate-y-1/2 h-16 w-6 bg-white text-[#C9CDD4] hover:text-[#B6BBC5] flex items-center justify-center z-20"
-                >
-                    <ChevronRight className="size-6 stroke-[2.75]" />
-                </button>
                 {isLoading ? (
-                    <div className="flex flex-col items-center justify-center h-full gap-3 text-[#86909c]">
-                        <LoadingIcon className="size-16 text-primary" />
+                    <div className="flex flex-col items-center justify-center h-full gap-3 text-text-3">
+                        <LoadingIcon className="size-20 text-primary" />
                     </div>
                 ) : channelDetail ? (
                     <>
                         {/* Channel Info Header */}
-                        <SheetHeader className="px-6 pt-6 pb-4 gap-0 border-b border-gray-100 text-left">
-                            {/* Channel Name */}
-                            <SheetTitle className="font-semibold text-[#1d2129] leading-tight mb-1">
-                                {channelDetail.name}
-                            </SheetTitle>
+                        <SheetHeader className="gap-4 border-b border-border-base pb-6 text-left">
+                            <div className="flex items-center justify-between">
+                                <SheetTitle className="text-[20px] font-medium leading-7 text-text-1">
+                                    {channelDetail.name}
+                                </SheetTitle>
+                                <button
+                                    type="button"
+                                    onClick={() => onOpenChange(false)}
+                                    className="inline-flex size-10 shrink-0 items-center justify-center rounded-md text-text-2 hover:bg-fill-1"
+                                    aria-label={localize("close")}
+                                >
+                                    <X className="size-5" />
+                                </button>
+                            </div>
 
                             {/* Description (2-line clamp + tooltip) */}
                             {channelDetail.description && (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
-                                        <p className="text-sm text-[#86909c] leading-relaxed line-clamp-2 cursor-default text-left">
+                                        <p className="cursor-default text-left text-[14px] leading-[22px] text-[#A9AEB8] line-clamp-2">
                                             {channelDetail.description}
                                         </p>
                                     </TooltipTrigger>
@@ -284,24 +285,24 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
                             )}
 
                             {/* Creator Info */}
-                            <div className="flex items-center gap-1.5 mb-3 mt-4">
+                            <div className="mt-0 flex items-center gap-1">
                                 <Avatar className="w-5 h-5">
                                     {/* Backend currently doesn't provide creator_avatar, use AvatarName fallback directly for now */}
                                     <AvatarName name={channelDetail.creator_name} className="text-xs" />
                                 </Avatar>
-                                <span className="text-sm text-[#86909c]">{channelDetail.creator_name}</span>
+                                <span className="text-[14px] leading-[22px] text-text-3">{channelDetail.creator_name}</span>
                             </div>
 
                             {/* Data Overview Row & Button */}
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center text-sm text-[#86909c]">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="flex min-w-0 flex-wrap items-center gap-2 text-[14px] leading-[22px] text-text-3">
                                     {channelDetail.source_infos && channelDetail.source_infos.length > 0 && (
-                                        <div className="flex items-center mr-3">
+                                        <div className="flex items-center">
                                             <div className="flex -space-x-1.5">
                                                 {channelDetail.source_infos.slice(0, 4).map((source: any, index: number) => (
                                                     <div
                                                         key={source.id}
-                                                        className="size-5 rounded-[4px] border border-white overflow-hidden bg-gray-100"
+                                                        className="size-5 rounded-sm border border-white overflow-hidden bg-gray-100"
                                                         style={{ zIndex: 4 - index }}
                                                     >
                                                         <img
@@ -314,8 +315,8 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
                                             </div>
                                         </div>
                                     )}
-                                    <span className="mr-3">{channelDetail.article_count ?? 0}{localize("com_subscription.articles_count")}</span>
-                                    <span>{channelDetail.subscriber_count ?? 0}{localize("com_subscription.subscribe")}</span>
+                                    <span className="whitespace-nowrap">{channelDetail.article_count ?? 0}{localize("com_subscription.articles_count")}</span>
+                                    <span className="whitespace-nowrap">{channelDetail.subscriber_count ?? 0}{localize("com_subscription.subscribe")}</span>
                                 </div>
 
                                 {/* Hide subscribe button for private channels or if the user is the creator */}
@@ -324,11 +325,11 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
                                         variant={btnConfig.variant}
                                         disabled={btnConfig.disabled || subscribing}
                                         onClick={handleSubscribe}
-                                        className={`h-8 px-5 py-1 text-sm font-normal rounded-md flex-shrink-0 ${effectiveSubscribeStatus === "subscribed"
-                                            ? "bg-[#f2f3f5] text-[#86909c] border-[#e5e6eb] cursor-default"
-                                            : effectiveSubscribeStatus === "pending" || effectiveSubscribeStatus === "rejected"
-                                                ? "bg-[#f2f3f5] text-[#c9cdd4] border-[#e5e6eb] cursor-not-allowed"
-                                                : "text-[#1d2129] border-[#e5e6eb] hover:bg-gray-50"
+                                        className={`h-8 rounded-md px-4 py-[5px] text-[14px] font-normal leading-[22px] flex-shrink-0 ${effectiveSubscribeStatus === "subscribed"
+                                            ? "bg-fill-2 text-text-3 border-border-base cursor-default"
+                                            : effectiveSubscribeStatus === "pending"
+                                                ? "bg-fill-2 text-text-4 border-border-base cursor-not-allowed"
+                                                : "text-text-1 border-border-base hover:bg-gray-50"
                                             }`}
                                     >
                                         {subscribing ? localize("com_subscription.processing") : btnConfig.text}
@@ -338,15 +339,11 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
                         </SheetHeader>
 
                         {/* Article List / Pending Message */}
-                        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-on-hover px-6">
+                        <div ref={previewListScrollRevealRef} className="flex-1 min-h-0 overflow-y-auto scrollbar-on-scroll px-4 pt-2">
                             {hideArticles ? (
                                 <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-                                    <img
-                                        className="size-[120px] object-contain mb-4"
-                                        src={`${__APP_ENV__.BASE_URL}/assets/channel/review.png`}
-                                        alt="Review Pending"
-                                    />
-                                    <div className="text-[#1d2129] text-[14px]">{localize("com_subscription.channel_content_needs_approval")}</div>
+                                    <NoPermissionIllustration className="size-[120px] mb-4" />
+                                    <div className="text-[14px] font-normal text-text-3">{localize("com_subscription.channel_content_needs_approval")}</div>
                                 </div>
                             ) : articles.length > 0 ? (
                                 <InfiniteScroll
@@ -356,28 +353,40 @@ export function ChannelPreviewDrawer({ channelId, open, onOpenChange, onSubscrip
                                     emptyText={localize("com_subscription.all_messages_are_here")}
                                     className=""
                                 >
-                                    {articles.map(article => (
-                                        <ArticleCard
+                                    {articles.map((article, i) => (
+                                        <div
                                             key={article.id}
-                                            article={article}
-                                            showArticleActions={false}
-                                            onSelect={(a) => {
-                                                const url = (a?.url || "").trim();
-                                                if (!url) {
-                                                    showToast({
-                                                        message: localize("com_subscription.no_original_link"),
-                                                        severity: NotificationSeverity.WARNING
-                                                    });
-                                                    return;
-                                                }
-                                                window.open(url, "_blank", "noopener,noreferrer");
-                                            }}
-                                            isSelected={false}
-                                        />
+                                            className={i > 0 ? "border-t border-dashed border-border-base" : undefined}
+                                        >
+                                            <ArticleCard
+                                                article={article}
+                                                showArticleActions={false}
+                                                variant="grid"
+                                                onSelect={(a) => {
+                                                    if (a?.sensitiveReview?.can_view === false) {
+                                                        showToast({
+                                                            message: a.sensitiveReview.auto_reply || localize("com_subscription.sensitive_review_blocked"),
+                                                            severity: NotificationSeverity.WARNING
+                                                        });
+                                                        return;
+                                                    }
+                                                    const url = (a?.url || "").trim();
+                                                    if (!url) {
+                                                        showToast({
+                                                            message: localize("com_subscription.no_original_link"),
+                                                            severity: NotificationSeverity.WARNING
+                                                        });
+                                                        return;
+                                                    }
+                                                    window.open(url, "_blank", "noopener,noreferrer");
+                                                }}
+                                                isSelected={false}
+                                            />
+                                        </div>
                                     ))}
                                 </InfiniteScroll>
                             ) : (
-                                <div className="flex items-center justify-center h-64 text-[#86909c] text-sm">{localize("com_subscription.no_articles")}</div>
+                                <div className="flex items-center justify-center h-64 text-text-3 text-sm">{localize("com_subscription.no_articles")}</div>
                             )}
                         </div>
                     </>

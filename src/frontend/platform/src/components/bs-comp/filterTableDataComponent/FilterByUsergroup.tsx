@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/bs-ui/select";
 import { getUserGroupsApi } from "@/controllers/API/user";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -58,7 +59,7 @@ const useGroups = () => {
             const res = await getUserGroupsApi({
                 signal: abortControllerRef.current.signal
             });
-            setGroups(res.records || []);
+            setGroups(res || []);
         } catch (error) {
             if (error.name !== 'AbortError') {
                 console.error('Failed to load user groups:', error);

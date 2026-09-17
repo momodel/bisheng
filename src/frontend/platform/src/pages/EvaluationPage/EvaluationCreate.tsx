@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import ShadTooltip from "@/components/ShadTooltipComponent";
 import { Button } from "@/components/bs-ui/button";
 import { Input } from "@/components/bs-ui/input";
@@ -172,10 +173,10 @@ export default function EvaluatingCreate() {
       };
 
       getAppsApi({
-        page: 1,
+        // F027: cursor-based; first page = no cursor.
         pageSize: 100,
         keyword: "",
-        type: typeMap[type]
+        type: typeMap[type],
       }).then((response) => {
         setDataSource(response.data);
       });
@@ -201,10 +202,10 @@ export default function EvaluatingCreate() {
       };
 
       getAppsApi({
-        page: 1,
+        // F027: cursor-based; first page = no cursor.
         pageSize: 100,
         keyword: value,
-        type: typeMap[selectedType]
+        type: typeMap[selectedType],
       }).then((response) => {
         setDataSource(response.data);
       });

@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import type {
   ColumnDef,
   ColumnFiltersState,
@@ -31,7 +32,7 @@ import {
   TableHeader,
   TableRow
 } from '~/components/ui';
-import { useMediaQuery, useToast } from '~/hooks';
+import { usePrefersMobileLayout, useToast } from '~/hooks';
 import { useDeleteFilesFromTable } from '~/hooks/Files';
 import useLocalize from '~/hooks/useLocalize';
 import AttachFileButton from './AttachFileButton';
@@ -69,7 +70,7 @@ export default function DataTableKnowledge<TData, TValue>({
   const [isDeleting, setIsDeleting] = useState(false);
   const [rowSelection, setRowSelection] = useState({});
   const [sorting, setSorting] = useState<SortingState>([]);
-  const isSmallScreen = useMediaQuery('(max-width: 768px)');
+  const isSmallScreen = usePrefersMobileLayout();
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const { deleteFiles } = useDeleteFilesFromTable(() => setIsDeleting(false));

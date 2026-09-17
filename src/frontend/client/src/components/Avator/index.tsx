@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { useMemo } from "react";
 import { cn } from "~/utils"
 import { AssistantIcon } from "~/components/ui/icon/AssistantIcon";
@@ -24,7 +25,7 @@ export default function AppAvator({ id = 1, flowType = '', url = '', className =
         return gradients[parseInt(num + '', 16) % gradients.length]
     }, [id])
 
-    if (url) return <img src={__APP_ENV__.BASE_URL + url} className={cn(`w-6 h-6 rounded-sm object-cover`, className)} />
+    if (url) return <img src={__APP_ENV__.BASE_URL + url} className={cn(`size-6 rounded-sm object-cover`, className)} />
 
     const flowConfig: Record<number, { icon: React.ReactNode, bgColor: string }> = {
         1: {
@@ -37,7 +38,7 @@ export default function AppAvator({ id = 1, flowType = '', url = '', className =
         },
         10: {
             icon: <WorkflowIcon className={cn(iconClassName, "text-primary")} />,
-            bgColor: '#E8F3FF'
+            bgColor: 'rgb(var(--brand-50))'
         }
     }
 

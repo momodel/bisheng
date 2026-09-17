@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import AssistantSetting from "@/components/Pro/security/AssistantSetting";
 import { TitleIconBg } from "@/components/bs-comp/cardComponent";
 import AppAvator from "@/components/bs-comp/cardComponent/avatar";
@@ -13,6 +14,7 @@ import {
 } from "@/components/bs-ui/accordion";
 import { Button } from "@/components/bs-ui/button";
 import { Input, InputList, Textarea } from "@/components/bs-ui/input";
+import { Switch } from "@/components/bs-ui/switch";
 import {
   QuestionTooltip,
   Tooltip,
@@ -33,7 +35,7 @@ export default function Setting() {
   const { t } = useTranslation();
 
   const { appConfig } = useContext(locationContext)
-  let { assistantState, dispatchAssistant } = useAssistantStore();
+  const { assistantState, dispatchAssistant } = useAssistantStore();
 
   return (
     <div
@@ -169,9 +171,21 @@ export default function Setting() {
                 <KnowledgeSelect
                   type="file"
                   multiple
-                  value={assistantState.knowledge_list.map(el => ({ label: el.name, value: el.id }))}
+                  enableSpace
+                  value={assistantState.knowledge_list.map(el => ({
+                    label: el.name,
+                    value: el.id,
+                    // KnowledgeTypeEnum.SPACE = 3 → space tab; anything else → file tab (F041).
+                    type: el.type === 3 ? 'space' : 'file'
+                  }))}
                   onChange={(vals) =>
-                    dispatchAssistant("setting", { knowledge_list: vals.map(el => ({ name: el.label, id: el.value })) })
+                    dispatchAssistant("setting", {
+                      knowledge_list: vals.map(el => ({
+                        name: el.label,
+                        id: el.value,
+                        type: el.type === 'space' ? 3 : 0
+                      }))
+                    })
                   }
                 >
                   {(reload) => (
@@ -188,6 +202,20 @@ export default function Setting() {
                     </div>
                   )}
                 </KnowledgeSelect>
+              </div>
+              {/* F041: 用户知识库权限校验 toggle — default OFF, gates knowledge-space
+                  retrieval by the runtime user's view_file (ON) vs the config author's (OFF). */}
+              <div className="mt-4 flex items-center gap-2">
+                <label className="bisheng-label flex items-center gap-1">
+                  {t("build.userAuthVerification")}
+                  <QuestionTooltip content={t("build.userAuthVerificationTips")} />
+                </label>
+                <Switch
+                  checked={!!assistantState.knowledge_auth}
+                  onCheckedChange={(checked) =>
+                    dispatchAssistant("setting", { knowledge_auth: checked })
+                  }
+                />
               </div>
             </div>
           </AccordionContent>

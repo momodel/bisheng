@@ -1,59 +1,39 @@
-import {
-    LayoutGrid,
-    List,
-    Upload,
-    FolderPlus,
-    ChevronDown,
-    ChevronRight,
-    CircleQuestionMark,
-    Info,
-    FunnelIcon,
-    Download,
-    Tag,
-    RotateCcw,
-    Trash2
-} from "lucide-react";
-import { KnowledgeSpace, FileStatus, SortType, SortDirection, SpaceRole, VisibilityType } from "~/api/knowledge";
-import { cn, copyText } from "~/utils";
-import { CompoundSearchInput, SearchParams } from "./CompoundSearchInput";
+import { CircleHelp, FolderPlus, FolderUp, Link2 } from "lucide-react";
+import { Outlined } from "bisheng-icons";
+import { KnowledgeSpace, SpaceRole, VisibilityType } from "~/api/knowledge";
 import {
     DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
     DropdownMenuTrigger,
-    DropdownMenuSeparator,
-    DropdownMenuCheckboxItem
 } from "~/components/ui/DropdownMenu";
-import { knowledgeSpaceDropdownSurfaceClassName } from "~/components/SidebarListMoreMenu";
-import { Button } from "~/components/ui/Button";
+import {
+    ActionMenuContent,
+    ActionMenuItem,
+    actionMenuLabelClassName,
+} from "~/components/ActionMenu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/Tooltip2";
-import { ShareOutlineIcon, AiChatIcon } from "~/components/icons";
-import { SingleIconButtonSortGlyph } from "~/components/icons/channels";
-import { useToastContext } from "~/Providers";
-import { useLocalize } from "~/hooks";
-import { useLayoutEffect, useRef, useState } from "react";
+import { CopyShareLinkButton } from "~/components/CopyShareLinkButton";
+import { useLocalize, usePrefersMobileLayout } from "~/hooks";
+import { knowledgeUploadCapabilities } from "../knowledgeUploadCapabilities";
+import { useRecoilValue } from "recoil";
+import { bishengConfState } from "~/pages/appChat/store/atoms";
 
-/** 工具栏实际宽度小于此值时：搜索独占一行，第二行为视图/筛选（左）与新增/批量（右）。阈值偏大以免中等宽度仍挤在一行。 */
-const TOOLBAR_COMPACT_MAX_WIDTH = 1040;
-
+/**
+ * Space header: identity (name / info / share) on the left, batch + add actions
+ * on the right. Search, filter, sort and the view toggle used to live here too;
+ * they moved into FileListToolbar so list and card views share one bar
+ * (Figma 13198:75829).
+ */
 interface KnowledgeSpaceHeaderProps {
     space: KnowledgeSpace;
     currentPath: Array<{ id?: string; name: string }>;
     onNavigateFolder: (folderId?: string) => void;
-    searchQuery: string;
     isSearching: boolean;
-    onSearch: (params: SearchParams) => void;
-    viewMode: "card" | "list";
-    setViewMode: (mode: "card" | "list") => void;
-    statusFilter: FileStatus[];
-    onFilterStatus: (status: FileStatus, checked: boolean) => void;
-    sortBy: SortType | undefined;
-    sortDirection: SortDirection | undefined;
-    onSort: (sortBy: SortType) => void;
     onCreateFolder: () => void;
     onTriggerUpload: () => void;
-    /** Localized comma-joined list of supported upload formats for the upload-button tooltip. */
-    supportedFormatsLabel?: string;
+    onTriggerUploadFolder: () => void;
+    onTriggerWebLink: () => void;
+    canCreateFolder?: boolean;
+    canUploadFile?: boolean;
 
     // Batch Operation Props
     selectedCount: number;
@@ -61,439 +41,270 @@ interface KnowledgeSpaceHeaderProps {
     hasFailedFiles: boolean;
     onClearSelection: () => void;
     onBatchDownload: () => void;
+    canBatchDownload?: boolean;
     onBatchTag: () => void;
     onBatchRetry: () => void;
     onBatchDelete: () => void;
-    onToggleAiAssistant?: () => void;
-    isAiAssistantOpen?: boolean;
+    canBatchDelete?: boolean;
+    /** F034: batch-move selected files/folders. Shown when provided. */
+    onBatchMove?: () => void;
+    /** F034: whether the current selection can be moved (no uploading placeholders + move permission). */
+    canBatchMove?: boolean;
+    onGoKnowledgeSquare?: () => void;
+    canShareSpace?: boolean;
+    /** Version management: gates the "process similar documents" entry + per-row version actions. */
+    versionManagementEnabled?: boolean;
+    /** True when the current selection contains at least one pending similar document. */
+    hasSimilarSelected?: boolean;
+    /** Opens the similar-document processing dialog (restricted to the current selection). */
+    onProcessSimilar?: () => void;
+    /** Whether the current user can manage members (gates the process-similar entry). */
+    canManageMembers?: boolean;
 }
 
 export function KnowledgeSpaceHeader({
     space,
     currentPath,
     onNavigateFolder,
-    searchQuery,
     isSearching,
-    onSearch,
-    viewMode,
-    setViewMode,
-    statusFilter,
-    onFilterStatus,
-    sortBy,
-    sortDirection,
-    onSort,
     onCreateFolder,
     onTriggerUpload,
-    supportedFormatsLabel,
+    onTriggerUploadFolder,
+    onTriggerWebLink,
+    canCreateFolder = false,
+    canUploadFile = false,
     selectedCount,
     hasFoldersSelected,
     hasFailedFiles,
-    onClearSelection,
     onBatchDownload,
+    canBatchDownload = false,
     onBatchTag,
     onBatchRetry,
     onBatchDelete,
-    onToggleAiAssistant,
-    isAiAssistantOpen
+    canBatchDelete = false,
+    onBatchMove,
+    canBatchMove = false,
+    canShareSpace = false,
+    versionManagementEnabled = false,
+    hasSimilarSelected = false,
+    onProcessSimilar,
+    canManageMembers = false,
 }: KnowledgeSpaceHeaderProps) {
     const localize = useLocalize();
-    const toolbarMeasureRef = useRef<HTMLDivElement>(null);
-    const [toolbarCompact, setToolbarCompact] = useState(false);
-
-    useLayoutEffect(() => {
-        const el = toolbarMeasureRef.current;
-        if (!el) return;
-        const update = () => {
-            const w = el.getBoundingClientRect().width;
-            setToolbarCompact(w > 0 && w < TOOLBAR_COMPACT_MAX_WIDTH);
-        };
-        update();
-        const ro = new ResizeObserver(() => update());
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
+    const bishengConfig = useRecoilValue(bishengConfState);
+    const isH5 = usePrefersMobileLayout();
 
     const isAdmin = space.role === SpaceRole.CREATOR || space.role === SpaceRole.ADMIN;
-    const showShare = space.visibility !== VisibilityType.PRIVATE;
-    const { showToast } = useToastContext();
-
-    const handleShare = () => {
-        try {
-            const base = window.location.origin + (__APP_ENV__.BASE_URL || "");
-            const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base;
-            const shareLink = `${normalizedBase}/knowledge/share/${space.id}`;
-            const shareText = localize("com_knowledge.welcome_join_space_link", { 0: space.name, 1: shareLink });
-            copyText(shareText)
-                .then(() => {
-                    showToast({ message: localize("com_knowledge.share_link_copied"), status: "success" });
-                })
-                .catch(() => {
-                    showToast({ message: localize("com_knowledge.copy_failed_retry"), status: "error" });
-                });
-        } catch {
-            showToast({ message: localize("com_knowledge.copy_failed_retry"), status: "error" });
-        }
-    };
-
-    const showToolbarActions = isAdmin || selectedCount > 1;
-
-    const viewFilterSortCluster = (
-        <div className="flex min-w-0 shrink-0 items-center gap-3">
-            <div className="inline-flex h-8 shrink-0 items-stretch rounded-md border border-[#e5e6eb] bg-white p-[3px] text-sm">
-                <button
-                    type="button"
-                    onClick={() => setViewMode("list")}
-                    className={cn(
-                        "flex min-w-[36px] flex-1 items-center justify-center rounded-[4px] px-2 transition-colors",
-                        viewMode === "list"
-                            ? "bg-[#E6EDFC] text-[#165DFF]"
-                            : "text-[#4e5969] hover:bg-[#f2f3f5]"
-                    )}
-                >
-                    <List className="size-4 shrink-0" />
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setViewMode("card")}
-                    className={cn(
-                        "flex min-w-[36px] flex-1 items-center justify-center rounded-[4px] px-2 transition-colors",
-                        viewMode === "card"
-                            ? "bg-[#E6EDFC] text-[#165DFF]"
-                            : "text-[#4e5969] hover:bg-[#f2f3f5]"
-                    )}
-                >
-                    <LayoutGrid className="size-4 shrink-0" />
-                </button>
-            </div>
-
-            {space.role !== SpaceRole.MEMBER && (
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button
-                            variant="outline"
-                            className={cn(
-                                "inline-flex h-8 w-8 min-h-8 min-w-8 shrink-0 items-center justify-center gap-0 rounded-md p-0 font-normal border-[#e5e6eb]",
-                                statusFilter.length > 0
-                                    ? "border-[#024DE3] bg-[#E6EDFC] text-[#024DE3] hover:bg-[#E6EDFC]"
-                                    : "bg-white text-gray-700 hover:bg-[#f7f8fa]"
-                            )}
-                        >
-                            <FunnelIcon className={cn("size-4", statusFilter.length > 0 ? "text-[#024DE3]" : "text-gray-700")} />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className={knowledgeSpaceDropdownSurfaceClassName}>
-                        <div className="px-2 py-1.5 text-xs font-medium text-[#86909c]">{localize("com_knowledge.status")}</div>
-                        <DropdownMenuCheckboxItem
-                            checked={statusFilter.includes(FileStatus.UPLOADING)}
-                            onCheckedChange={(checked) => onFilterStatus(FileStatus.UPLOADING, checked)}
-                            onSelect={(e) => e.preventDefault()}
-                        >
-                            {localize("com_knowledge.uploading_status")}
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                            checked={statusFilter.includes(FileStatus.WAITING)}
-                            onCheckedChange={(checked) => onFilterStatus(FileStatus.WAITING, checked)}
-                            onSelect={(e) => e.preventDefault()}
-                        >
-                            {localize("com_knowledge.queueing_status")}
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                            checked={statusFilter.includes(FileStatus.PROCESSING)}
-                            onCheckedChange={(checked) => onFilterStatus(FileStatus.PROCESSING, checked)}
-                            onSelect={(e) => e.preventDefault()}
-                        >
-                            {localize("com_knowledge.parsing_status")}
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                            checked={statusFilter.includes(FileStatus.REBUILDING)}
-                            onCheckedChange={(checked) => onFilterStatus(FileStatus.REBUILDING, checked)}
-                            onSelect={(e) => e.preventDefault()}
-                        >
-                            {localize("com_knowledge.rebuilding_status")}
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                            checked={statusFilter.includes(FileStatus.SUCCESS)}
-                            onCheckedChange={(checked) => onFilterStatus(FileStatus.SUCCESS, checked)}
-                            onSelect={(e) => e.preventDefault()}
-                        >
-                            {localize("com_knowledge.success")}
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                            checked={statusFilter.includes(FileStatus.FAILED)}
-                            onCheckedChange={(checked) => onFilterStatus(FileStatus.FAILED, checked)}
-                            onSelect={(e) => e.preventDefault()}
-                        >
-                            {localize("com_knowledge.fail")}
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                            checked={statusFilter.includes(FileStatus.TIMEOUT)}
-                            onCheckedChange={(checked) => onFilterStatus(FileStatus.TIMEOUT, checked)}
-                            onSelect={(e) => e.preventDefault()}
-                        >
-                            {localize("com_knowledge.timeout")}
-                        </DropdownMenuCheckboxItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            )}
-
-            {viewMode === "card" && (
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button
-                            variant="outline"
-                            className="inline-flex h-8 w-8 min-h-8 min-w-8 shrink-0 items-center justify-center gap-0 rounded-md border border-[#e5e6eb] bg-white p-0 font-normal text-gray-700"
-                        >
-                            <SingleIconButtonSortGlyph className="size-4 shrink-0" aria-hidden />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className={knowledgeSpaceDropdownSurfaceClassName}>
-                        <div className="px-2 py-1.5 text-xs font-medium text-[#86909c]">{localize("com_knowledge.sort_field")}</div>
-                        <DropdownMenuItem onClick={() => onSort(SortType.NAME)}>
-                            {localize("com_knowledge.sort_by_name_label")}
-                            {sortBy === SortType.NAME && (sortDirection === SortDirection.ASC ? "↑" : "↓")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => onSort(SortType.TYPE)}>
-                            {localize("com_knowledge.sort_by_type_label")}
-                            {sortBy === SortType.TYPE && (sortDirection === SortDirection.ASC ? "↑" : "↓")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => onSort(SortType.UPDATE_TIME)}>
-                            {localize("com_knowledge.sort_by_update_time_label")}
-                            {sortBy === SortType.UPDATE_TIME && (sortDirection === SortDirection.ASC ? "↑" : "↓")}
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            )}
-        </div>
-    );
+    const showShare = canShareSpace && space.visibility !== VisibilityType.PRIVATE;
+    const selectedThreshold = isH5 ? 0 : 1;
+    const showAddMenu = canCreateFolder || canUploadFile;
+    // Filter / sort / search / view-toggle all moved into FileListToolbar.
+    const showToolbarActions = showAddMenu || isAdmin || selectedCount > selectedThreshold;
 
     const batchAndAddActions = showToolbarActions && (
         <div className="flex shrink-0 items-center gap-2">
-            {selectedCount > 1 && (
+            {selectedCount > selectedThreshold && (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="sm" variant="outline" className="h-8 rounded-md border-[#e5e6eb] font-normal text-[#4e5969]">
+                        <button
+                            type="button"
+                            className="inline-flex h-8 shrink-0 items-center justify-center gap-0.5 rounded-md border border-border-base bg-white px-3 text-sm font-normal text-text-2 transition-colors hover:bg-fill-1"
+                        >
                             {localize("com_knowledge.batch_operation")}
-                            <ChevronDown className="ml-1 size-4" />
-                        </Button>
+                            <Outlined.Down className="size-4" />
+                        </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className={knowledgeSpaceDropdownSurfaceClassName}>
-                        <DropdownMenuItem onClick={onBatchDownload} className="cursor-pointer">
-                            <Download className="mr-2 size-4" />
-                            {localize("com_knowledge.batch_download")}
-                        </DropdownMenuItem>
+                    <ActionMenuContent align="end" width={140}>
+                        {versionManagementEnabled && canManageMembers && hasSimilarSelected && onProcessSimilar && (
+                            <ActionMenuItem
+                                onClick={onProcessSimilar}
+                                icon={<Outlined.FileSearch />}
+                                label={localize("com_knowledge.version.header_process_similar_label")}
+                            />
+                        )}
+                        {canBatchDownload && (
+                            <ActionMenuItem
+                                onClick={onBatchDownload}
+                                icon={<Outlined.Download />}
+                                label={localize("com_knowledge.batch_download")}
+                            />
+                        )}
                         {isAdmin && !hasFoldersSelected && (
-                            <DropdownMenuItem onClick={onBatchTag} className="cursor-pointer">
-                                <Tag className="mr-2 size-4" />
-                                {localize("com_knowledge.batch_add_tags")}
-                            </DropdownMenuItem>
+                            <ActionMenuItem
+                                onClick={onBatchTag}
+                                icon={<Outlined.Tag />}
+                                label={localize("com_knowledge.batch_add_tags")}
+                            />
                         )}
                         {isAdmin && hasFailedFiles && (
-                            <DropdownMenuItem onClick={onBatchRetry} className="cursor-pointer">
-                                <RotateCcw className="mr-2 size-4" />
-                                {localize("com_knowledge.batch_retry")}
-                            </DropdownMenuItem>
+                            <ActionMenuItem
+                                onClick={onBatchRetry}
+                                icon={<Outlined.Refresh />}
+                                label={localize("com_knowledge.batch_retry")}
+                            />
                         )}
-                        {isAdmin && (
-                            <DropdownMenuItem onClick={onBatchDelete} className="cursor-pointer text-[#f53f3f] focus:text-[#f53f3f]">
-                                <Trash2 className="mr-2 size-4" />
-                                {localize("com_knowledge.batch_delete")}
-                            </DropdownMenuItem>
+                        {onBatchMove && (
+                            <ActionMenuItem
+                                disabled={!canBatchMove}
+                                onClick={onBatchMove}
+                                icon={<Outlined.MoveToFolder />}
+                                label={localize("com_knowledge.move")}
+                            />
                         )}
-                    </DropdownMenuContent>
+                        {canBatchDelete && (
+                            <ActionMenuItem
+                                danger
+                                onClick={onBatchDelete}
+                                icon={<Outlined.Delete />}
+                                label={localize("com_knowledge.batch_delete")}
+                            />
+                        )}
+                    </ActionMenuContent>
                 </DropdownMenu>
             )}
-            {isAdmin && (
+            {showAddMenu && (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="sm" className="h-8 rounded-md px-4 font-normal" disabled={isSearching}>
+                        <button
+                            type="button"
+                            disabled={isSearching}
+                            className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-border-base bg-white px-4 text-sm text-text-1 transition-colors hover:bg-fill-1 disabled:cursor-not-allowed disabled:text-text-4 disabled:hover:bg-transparent"
+                        >
                             {localize("com_knowledge.add_new")}
-                            <ChevronDown className="ml-1 size-4" />
-                        </Button>
+                            <Outlined.Down className="size-4" />
+                        </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className={knowledgeSpaceDropdownSurfaceClassName}>
-                        <DropdownMenuItem onClick={onCreateFolder} className="cursor-pointer">
-                            <FolderPlus className="mr-2 size-4" />
-                            {localize("com_knowledge.new_folder")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={onTriggerUpload} className="cursor-pointer">
-                            <Upload className="mr-2 size-4" />
-                            <span className="flex-1">{localize("com_knowledge.upload_file")}</span>
-                            {supportedFormatsLabel && (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <span
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                            onPointerDown={(e) => e.stopPropagation()}
-                                            className="ml-2 inline-flex items-center text-[#86909C] hover:text-[#4E5969]"
-                                            aria-label={localize("com_knowledge.supported_formats_tip", { formats: supportedFormatsLabel })}
-                                        >
-                                            <CircleQuestionMark className="size-3.5" />
+                    <ActionMenuContent align="end">
+                        {canCreateFolder && (
+                            <ActionMenuItem
+                                onClick={onCreateFolder}
+                                icon={<FolderPlus />}
+                                label={localize("com_knowledge.new_folder")}
+                            />
+                        )}
+                        {canUploadFile && (
+                            <>
+                                <ActionMenuItem
+                                    onClick={onTriggerUpload}
+                                    icon={<Outlined.Upload />}
+                                >
+                                    <div className="flex min-w-0 flex-1 items-center">
+                                        <span className={actionMenuLabelClassName}>
+                                            {localize("com_knowledge.upload_file")}
                                         </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-[320px] z-[260] bg-[rgba(23,23,23,0.85)]">
-                                        {localize("com_knowledge.supported_formats_tip", { formats: supportedFormatsLabel })}
-                                    </TooltipContent>
-                                </Tooltip>
-                            )}
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <span
+                                                    className="ml-auto inline-flex size-4 shrink-0 items-center justify-center text-[#8a94a6]"
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    onPointerDown={(event) => event.stopPropagation()}
+                                                >
+                                                    <CircleHelp className="size-3.5" />
+                                                </span>
+                                            </TooltipTrigger>
+                                            <TooltipContent
+                                                side="top"
+                                                className="z-[999] max-w-md"
+                                            >
+                                                {localize(
+                                                    bishengConfig?.enable_media_upload
+                                                        ? "com_knowledge.upload_file_types_tip"
+                                                        : "com_knowledge.upload_file_types_tip_without_media",
+                                                )}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </ActionMenuItem>
+                                <ActionMenuItem
+                                    onClick={onTriggerUploadFolder}
+                                    icon={<FolderUp />}
+                                    label={localize("com_knowledge.upload_folder")}
+                                />
+                                {knowledgeUploadCapabilities.webLink && (
+                                    <ActionMenuItem
+                                        onClick={onTriggerWebLink}
+                                        icon={<Link2 />}
+                                        label={localize("com_knowledge.web_link")}
+                                    />
+                                )}
+                            </>
+                        )}
+                    </ActionMenuContent>
                 </DropdownMenu>
             )}
         </div>
     );
 
-    const searchFieldClassName = toolbarCompact
-        ? "relative min-w-0 w-full"
-        : cn(
-            "relative min-w-0 w-full transition-[width,max-width,flex-grow] duration-200 ease-out",
-            "sm:flex-none sm:w-[450px] sm:max-w-[450px] sm:shrink-0",
-            // Driven by CompoundSearchInput's data-expanded attribute (input focus
-            // OR scope DropdownMenu open) — survives Radix portal moving focus
-            // outside the search field.
-            "sm:has-[[data-expanded=true]]:flex-1 sm:has-[[data-expanded=true]]:w-auto sm:has-[[data-expanded=true]]:max-w-none sm:has-[[data-expanded=true]]:min-w-0"
-        );
-
     return (
-        <div className="space-y-4 pt-5 pb-4">
-            {/* 面包屑 / Title */}
-            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                {/* 左侧：标题与信息 / 面包屑 */}
-                <div className="flex items-center gap-1 text-sm flex-wrap w-full sm:w-auto">
-                    {currentPath.length === 0 ? (
-                        <div className="flex items-center gap-1">
-                            <h1 className="text-base text-[#1d2129]">{space.name}</h1>
-                            <Tooltip>
-                                <TooltipTrigger className="cursor-pointer">
-                                    <Info className="size-4 text-[#86909c] outline-none hover:text-[#165dff]" />
-                                </TooltipTrigger>
-                                <TooltipContent noArrow className="bg-white shadow-md px-3 py-2 max-w-md w-64 z-[999] relative">
-                                    <div className="space-y-1.5 text-gray-800 text-sm">
-                                        <div><span className="text-gray-400">{localize("com_knowledge.space_desc_label")}</span>
-                                            <p>{space.description || "-"}</p>
-                                        </div>
-                                        <div><span className="text-gray-400">{localize("com_knowledge.creator_label")}</span>
-                                            <p>{space.creator}</p>
-                                        </div>
-                                        <div><span className="text-gray-400">{localize("com_knowledge.joined_count_label")}</span>
-                                            <p>{space.memberCount || 0}</p>
-                                        </div>
-                                        <div><span className="text-gray-400">{localize("com_knowledge.total_files_label")}</span>
-                                            <p>{space.totalFileCount || 0}</p>
-                                        </div>
-                                    </div>
-                                </TooltipContent>
-                            </Tooltip>
-                        </div>
-                    ) : (
-                        <div className="flex items-center gap-1 text-[#1d2129]">
-                            <button
-                                onClick={() => onNavigateFolder(undefined)}
-                                className="text-[#4e5969] hover:text-[#165dff] shrink-0"
-                            >
-                                {space.name}
-                            </button>
-                            {(() => {
-                                // Show ellipsis when path is longer than 3 levels
-                                const MAX_VISIBLE = 3;
-                                let visibleItems = currentPath;
-                                let showEllipsis = false;
-                                if (currentPath.length > MAX_VISIBLE) {
-                                    // Show first item, ellipsis, then last 2 items
-                                    visibleItems = [
-                                        currentPath[0],
-                                        ...currentPath.slice(-2),
-                                    ];
-                                    showEllipsis = true;
-                                }
-                                return visibleItems.map((item, displayIdx) => {
-                                    const isLast = displayIdx === visibleItems.length - 1;
-                                    return (
-                                        <div key={item.id} className="flex items-center gap-1 min-w-0">
-                                            <span className="text-[#86909c] mx-0.5 shrink-0">/</span>
-                                            {showEllipsis && displayIdx === 1 && (
-                                                <>
-                                                    <span className="text-[#86909c]">...</span>
-                                                    <span className="text-[#86909c] mx-0.5 shrink-0">/</span>
-                                                </>
-                                            )}
-                                            {isLast ? (
-                                                <span className="font-medium text-[#1d2129] truncate max-w-[160px]">
-                                                    {item.name}
-                                                </span>
-                                            ) : (
-                                                <button
-                                                    onClick={() => onNavigateFolder(item.id)}
-                                                    className="text-[#4e5969] hover:text-[#165dff] truncate max-w-[120px]"
-                                                >
-                                                    {item.name}
-                                                </button>
-                                            )}
-                                        </div>
-                                    );
-                                });
-                            })()}
-                        </div>
-                    )}
-                </div>
+        <div className="flex min-h-8 items-center justify-between gap-3 px-4 pb-4 pt-4 max-[767px]:gap-2 max-[767px]:pb-3">
 
-                {/* 右侧：AI助手和分享 */}
-                <div className="flex items-center gap-3 self-end sm:self-auto shrink-0 mt-2 sm:mt-0">
-                    <Button
-                        variant="ghost"
-                        className="ai-btn-border-draw h-8 px-1.5 gap-1 font-normal rounded-[6px] hover:bg-transparent"
-                        disabled={isSearching}
-                        onClick={onToggleAiAssistant}
-                    >
-                        <span className="ai-btn-shimmer-overlay" />
-                        <AiChatIcon className="size-4" stroke={isSearching ? "#c9cdd4" : "#335cff"} />
-                        <span className={isSearching ? '' : 'text-[#000D4D]'}>{localize("com_knowledge.ai_assistant")}</span>
-                    </Button>
-
-                    {showShare && (
-                        <Button
-                            variant="ghost"
-                            className="h-8 px-1.5 gap-1 font-normal transition-colors"
-                            onClick={handleShare}
+            {/* 左侧：根目录显示空间标题 + 信息；进入文件夹后显示当前文件夹名（设计稿 11772:70584） */}
+            <div className="flex min-w-0 flex-1 items-center gap-1 text-sm">
+                {currentPath.length > 0 ? (
+                    <>
+                        {/* 返回按钮 + 分隔线先隐藏，后续可能恢复（设计稿 11772:70584）
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const parent = currentPath[currentPath.length - 2];
+                                onNavigateFolder(parent?.id);
+                            }}
+                            aria-label={localize("com_ui_go_back")}
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md p-2 text-text-2 transition-colors hover:bg-fill-1"
                         >
-                            <ShareOutlineIcon className="size-4 text-gray-800" />
-                            {localize("com_knowledge.share")}</Button>
-                    )}
-                </div>
-            </div>
-
-            {/* Toolbar：宽屏一行（搜索 + 视图/筛选 + 右侧操作）；窄内容区（宽度小于 TOOLBAR_COMPACT_MAX_WIDTH）两行：仅搜索，其次为视图/筛选与新增/批量 */}
-            <div ref={toolbarMeasureRef} className="w-full min-w-0">
-                {toolbarCompact ? (
-                    <div className="flex flex-col gap-3">
-                        <div className={searchFieldClassName}>
-                            <CompoundSearchInput
-                                spaceId={space.id}
-                                isRoot={currentPath.length === 0}
-                                onSearch={onSearch}
-                            />
-                        </div>
-                        <div className="flex min-w-0 items-center justify-between gap-2">
-                            {viewFilterSortCluster}
-                            {batchAndAddActions}
-                        </div>
-                    </div>
+                            <Outlined.ArrowLeft className="size-4" />
+                        </button>
+                        <div className="mx-1 h-4 w-px shrink-0 bg-border-base" aria-hidden />
+                        */}
+                        <h1 className="min-w-0 truncate text-base font-normal text-text-1 max-[767px]:text-[16px] max-[767px]:leading-6">
+                            {currentPath[currentPath.length - 1]?.name || space.name}
+                        </h1>
+                    </>
                 ) : (
-                    <div className="flex min-w-0 items-center justify-between gap-3">
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
-                            <div className={searchFieldClassName}>
-                                <CompoundSearchInput
-                                    spaceId={space.id}
-                                    isRoot={currentPath.length === 0}
-                                    onSearch={onSearch}
-                                />
-                            </div>
-                            {viewFilterSortCluster}
-                        </div>
-                        {batchAndAddActions}
+                    <div className="flex min-w-0 flex-1 items-center gap-1">
+                        <h1 className="min-w-0 truncate text-base text-text-1 max-[767px]:text-[16px] max-[767px]:leading-6">
+                            {space.name}
+                        </h1>
+                        <Tooltip>
+                            <TooltipTrigger className="shrink-0 cursor-pointer">
+                                <Outlined.Info className="size-4 text-text-3 outline-none hover:text-blue-500" />
+                            </TooltipTrigger>
+                            <TooltipContent noArrow className="bg-white shadow-md px-3 py-2 max-w-md w-64 z-[999] relative">
+                                <div className="space-y-1.5 text-gray-800 text-sm">
+                                    <div><span className="text-gray-400">{localize("com_knowledge.space_desc_label")}</span>
+                                        <p>{space.description || "-"}</p>
+                                    </div>
+                                    <div><span className="text-gray-400">{localize("com_knowledge.creator_label")}</span>
+                                        <p>{space.creator}</p>
+                                    </div>
+                                    <div><span className="text-gray-400">{localize("com_knowledge.joined_count_label")}</span>
+                                        <p>{space.memberCount || 0}</p>
+                                    </div>
+                                    <div><span className="text-gray-400">{localize("com_knowledge.total_files_label")}</span>
+                                        <p>{space.totalFileCount || 0}</p>
+                                    </div>
+                                </div>
+                            </TooltipContent>
+                        </Tooltip>
                     </div>
                 )}
+            </div>
+
+            {/* 右侧：分享 + 批量操作 + 新增。搜索/筛选/排序/视图切换已移入 FileListToolbar */}
+            <div className="flex shrink-0 items-center gap-3">
+                {showShare && (
+                    <CopyShareLinkButton
+                        iconOnly
+                        variant="outline"
+                        sharePath={`/knowledge/share/${space.id}`}
+                        successMessage={localize("com_knowledge.share_link_copied")}
+                        errorMessage={localize("com_knowledge.copy_failed_retry")}
+                        className="size-8 shrink-0 rounded-md border border-[#ebebeb] bg-white p-0 transition-colors hover:bg-fill-1"
+                        icon={<Outlined.Share className="size-4 text-text-2" />}
+                        aria-label={localize("com_knowledge.share")}
+                    />
+                )}
+                {batchAndAddActions}
             </div>
         </div>
     );

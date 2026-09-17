@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import { Input } from "@/components/bs-ui/input";
 import { Label } from "@/components/bs-ui/label";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
@@ -105,6 +106,14 @@ const modelProviders = {
         },
     ],
     qwen: [
+        {
+            label: "Base URL",
+            type: "text",
+            placeholder: "",
+            default: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            required: true,
+            key: "openai_api_base",
+        },
         {
             label: "API Key",
             type: "password",

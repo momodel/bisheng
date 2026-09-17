@@ -1,27 +1,55 @@
-import { Minus, Plus, Search, X, XCircle } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
-import { NotificationSeverity } from "~/common";
+import { Outlined } from "bisheng-icons";
+import { useState, useEffect, useRef, type MouseEvent } from "react";
 import { Button } from "~/components/ui/Button";
 import { Checkbox } from "~/components/ui/Checkbox";
 import { Input } from "~/components/ui/Input";
 import { truncateName, type InformationSource } from "~/api/channels";
 import { cn } from "~/utils";
-import { useLocalize } from "~/hooks";
+import { useLocalize, usePrefersMobileLayout } from "~/hooks";
 import { useSourceManager } from "../hooks/useSourceManager";
-import { useConfirm, useToastContext } from "~/Providers";
-import { ChannelBookIcon, ChannelLoadingIcon, ChannelRightSmallUpIcon } from "~/components/icons/channels";
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle
-} from "~/components/ui/AlertDialog";
+import { useConfirm } from "~/Providers";
+import { ChannelRightSmallUpIcon } from "~/components/icons/channels";
+import { ListWebLinkIllustration, EmptyStateIllustration, CrawlingIllustration } from "~/components/illustrations";
+import { WechatLinkHint } from "./WechatLinkHint";
 
 const MAX_SOURCES = 50;
 const MAX_NAME_DISPLAY = 20;
+
+/** 网站行：文本只展示（无超链接样式与点击），跳转入口收口到末尾箭头按钮上；箭头仅 hover 时露出 */
+function WebsiteSourceLink({
+    name,
+    url: _url,
+    maxLen = 20,
+    onNavigate,
+}: {
+    name: string;
+    url: string;
+    maxLen?: number;
+    onNavigate: (e: MouseEvent<HTMLElement>) => void;
+}) {
+    return (
+        <span className="group/link inline-flex max-w-full items-center align-middle text-[#1D2129]">
+            {/* External-link source: name turns brand blue on hover and stays blue (does not follow theme). */}
+            <span className="truncate transition-colors group-hover/link:text-[#335CFF]">
+                {truncateName(name, maxLen)}
+            </span>
+            <button
+                type="button"
+                aria-label="open external link"
+                onClick={onNavigate}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        (e.currentTarget as HTMLElement).click();
+                    }
+                }}
+                className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center text-[#335CFF] cursor-pointer opacity-0 transition-opacity group-hover/link:opacity-100"
+            >
+                <ChannelRightSmallUpIcon className="size-4 shrink-0" />
+            </button>
+        </span>
+    );
+}
 
 interface AddSourceDropdownProps {
     sources: InformationSource[];
@@ -39,13 +67,12 @@ export function AddSourceDropdown({
     expanded,
     onExpandChange,
     onEnqueueCrawl,
-    queueInProgressCount,
     resetToken
 }: AddSourceDropdownProps) {
     const localize = useLocalize();
+    const isH5 = usePrefersMobileLayout();
     const mgr = useSourceManager(sources, onSourcesChange, expanded, onExpandChange);
     const confirm = useConfirm();
-    const { showToast } = useToastContext();
     const [inputValue, setInputValue] = useState("");
     const [isCollapsedListScrolling, setIsCollapsedListScrolling] = useState(false);
     const collapsedListScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,7 +95,14 @@ export function AddSourceDropdown({
         const isInsideOtherDialog = (node: Node | null) => {
             if (!(node instanceof Element)) return false;
             const targetDialog = node.closest('[role="dialog"], [role="alertdialog"]');
-            return targetDialog != null && targetDialog !== rootDialog;
+            if (targetDialog) return targetDialog !== rootDialog;
+            // A modal's full-screen mask is a SIBLING of its [role=alertdialog]
+            // node inside the same portal layer, so `closest` can never see it.
+            // Without this, clicking the mask of the stacked "link unrecognized"
+            // confirm read as "clicked outside" and collapsed this panel — which
+            // looked like the click had passed through the mask.
+            const layerDialog = node.parentElement?.querySelector('[role="dialog"], [role="alertdialog"]');
+            return layerDialog != null && layerDialog !== rootDialog;
         };
 
         const closePanel = () => {
@@ -142,9 +176,9 @@ export function AddSourceDropdown({
                     onKeyDown={(e) => e.key === "Enter" && onExpandChange(true)}
                 >
                     <div className="flex shrink-0 items-center gap-2 bg-[#F7F7F7] px-4 py-3">
-                        <Plus className="size-4 flex-shrink-0 text-[#86909C]" />
-                        <span className="flex-1 text-[14px] text-[#86909C] text-left">{localize("com_subscription.add_official_accounts_and_webpages")}</span>
-                        <span className="flex-shrink-0 text-[12px] text-[#86909C]">
+                        <Outlined.Plus className="size-4 flex-shrink-0 text-[#999999]" />
+                        <span className="flex-1 text-left text-[14px] text-[#999999]">{localize("com_subscription.add_official_accounts_and_webpages")}</span>
+                        <span className="flex-shrink-0 text-[12px] text-[#999999]">
                             {sources.length}/{MAX_SOURCES}
                         </span>
                     </div>
@@ -170,33 +204,19 @@ export function AddSourceDropdown({
                                             )}
                                         </div>
                                         <span className="flex-1 text-[14px] text-[#1D2129] truncate">
-                                            <span
-                                                className={cn(
-                                                    "inline-flex items-center max-w-full align-middle",
-                                                    s.type === "website" && s.url && "group/link text-[#1D2129] hover:text-[#165DFF] transition-colors"
-                                                )}
-                                                onClick={
-                                                    s.type === "website" && s.url
-                                                        ? (e) => {
-                                                            e.stopPropagation();
-                                                            window.open(s.url, "_blank");
-                                                        }
-                                                        : undefined
-                                                }
-                                            >
-                                                <span
-                                                    className={cn(
-                                                        "truncate",
-                                                        s.type === "website" && s.url && "hover:underline"
-                                                    )}
-                                                >
-                                                    {truncateName(s.name)}
-                                                </span>
-                                                {s.type === "website" && s.url && (
-                                                    <ChannelRightSmallUpIcon className="ml-0.5 w-4 h-4 opacity-0 group-hover/link:opacity-100 transition-opacity flex-shrink-0" />
-                                                )}
-                                            </span>
-                                            <span className="ml-2 flex-shrink-0 rounded border border-[#165DFF] px-0.5 text-[11px] text-[#165DFF]">
+                                            {s.type === "website" && s.url ? (
+                                                <WebsiteSourceLink
+                                                    name={s.name}
+                                                    url={s.url}
+                                                    onNavigate={(e) => {
+                                                        e.stopPropagation();
+                                                        window.open(s.url, "_blank");
+                                                    }}
+                                                />
+                                            ) : (
+                                                <span className="truncate">{truncateName(s.name)}</span>
+                                            )}
+                                            <span className="ml-2 flex-shrink-0 rounded border border-blue-500 px-0.5 text-[11px] text-blue-500">
                                                 {s.type === "official_account" ? localize("com_subscription.official_account") : localize("com_subscription.website")}
                                             </span>
                                         </span>
@@ -210,7 +230,7 @@ export function AddSourceDropdown({
                                             aria-label={localize("com_subscription.remove_source")}
                                         >
                                             <span className="inline-flex items-center justify-center w-3 h-3 border-[1px] border-[#F53F3F]">
-                                                <Minus className="size-3 text-[#F53F3F]" />
+                                                <span className="h-px w-2 bg-[#F53F3F]" />
                                             </span>
                                         </button>
                                     </div>
@@ -231,27 +251,39 @@ export function AddSourceDropdown({
             {expanded && (
                 <div className="flex items-center gap-2 h-[46px]">
                     <div className="flex-1" />
-                    <span className="flex-shrink-0 text-[12px] text-[#86909C]">
+                    <span className="flex-shrink-0 text-[12px] text-[#999999]">
                         {mgr.pendingSources.length}/{MAX_SOURCES}
                     </span>
                 </div>
             )}
 
-            {/* 添加时：输入框+Tab+列表 同一整体，高 z-index 浮动，实时搜索 */}
+            {/* 添加时：输入框+Tab+列表 同一整体，浮在表单之上，实时搜索 */}
+            {/* Page-level dropdown, so it must stay UNDER everything that is meant
+                to cover it: portalled tooltips (z-50) and the modal layer
+                (Dialog z-100 / AlertDialog z-110). It used to sit at z-[220] —
+                a leftover from when this panel lived inside a drawer — which put
+                it above the confirm dialog and above its own "where to copy the
+                link" tooltip. Only the crawl-queue dropdown (z-30) outranks it. */}
             {expanded && (
                 <div
                     ref={expandedPanelRef}
-                    className="absolute left-0 right-0 top-0 z-[220] flex h-[440px] min-w-[400px] flex-col overflow-hidden rounded-lg border border-[#E5E6EB] bg-white shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+                    className={cn(
+                        "absolute left-0 right-0 top-0 z-20 flex flex-col overflow-hidden rounded-lg border border-[#E5E6EB] bg-white shadow-[0_4px_16px_rgba(0,0,0,0.12)]",
+                        "h-[440px] min-w-[400px]",
+                        isH5 && "h-[min(70dvh,560px)] min-w-0 max-w-full rounded-lg"
+                    )}
                 >
                     <div className="flex shrink-0 items-center gap-2 border-b border-[#E5E6EB] pb-0 mb-2">
                         <div className="relative flex-1 rounded-lg m-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[#999999]" />
+                            <Outlined.Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#999999]" />
                             <Input
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
-                                        mgr.setSearchKeyword(inputValue.trim());
+                                        // Submit, not just "set the keyword": pressing Enter
+                                        // again on an unchanged link has to retry it.
+                                        mgr.submitSearch(inputValue.trim());
                                     }
                                 }}
                                 placeholder={localize("com_subscription.enter_official_account")}
@@ -267,7 +299,7 @@ export function AddSourceDropdown({
                                     }}
                                     className="absolute right-3 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#4E5969]"
                                 >
-                                    <X className="size-4" />
+                                    <Outlined.Close className="size-4" />
                                 </button>
                             )}
                         </div>
@@ -282,7 +314,7 @@ export function AddSourceDropdown({
                                     className={cn(
                                         "pb-2 text-[14px] font-medium border-b-2 -mb-px",
                                         mgr.activeTab === "official_account"
-                                            ? "text-[#165DFF] border-[#165DFF]"
+                                            ? "text-blue-500 border-blue-500"
                                             : "text-[#86909C] border-transparent"
                                     )}
                                 >
@@ -294,7 +326,7 @@ export function AddSourceDropdown({
                                     className={cn(
                                         "pb-2 text-[14px] font-medium border-b-2 -mb-px",
                                         mgr.activeTab === "website"
-                                            ? "text-[#165DFF] border-[#165DFF]"
+                                            ? "text-blue-500 border-blue-500"
                                             : "text-[#86909C] border-transparent"
                                     )}
                                 >
@@ -310,53 +342,50 @@ export function AddSourceDropdown({
                     >
                         {mgr.viewMode === "noResultNonUrl" && (
                             <div className="flex min-h-full flex-col items-center justify-center px-4 py-8 text-center">
-                                <div className="mb-4 rounded-full p-3">
-                                    <ChannelBookIcon className="w-[120px] h-[120px] mb-5" />
+                                <div className="mb-4">
+                                    <ListWebLinkIllustration className="mx-auto block w-[120px] h-[120px]" />
                                 </div>
-                                <p className="text-[14px] leading-6 text-[#4E5969] whitespace-pre-line">
-                                    {localize("com_subscription.no_source_collected") ||
-                                        localize("com_subscription.source_not_indexed_try_full_url")}
-                                </p>
+                                {/* One line: the sentence reads as a single
+                                    instruction, so it is kept unwrapped and the
+                                    panel scrolls rather than breaking it. Below
+                                    the H5 breakpoint it must wrap instead —
+                                    unwrapped it needs ~520px, which pushes the
+                                    tappable phrase off-screen behind a
+                                    horizontal scroll on a phone. */}
+                                <WechatLinkHint
+                                    className="max-w-full whitespace-nowrap max-[767px]:whitespace-normal"
+                                    sentenceKey="com_subscription.no_source_collected"
+                                    labelKey="com_subscription.wechat_article_link_label"
+                                />
                             </div>
                         )}
                         {mgr.viewMode === "noResultUrl" && (
                             <div className="flex min-h-full flex-col items-center justify-center px-4 py-8 text-center">
                                 <div className="mb-4">
-                                    <img
-                                        src={`${__APP_ENV__.BASE_URL}/assets/channel/empty.png`}
-                                        alt=""
-                                        className="w-[120px] h-[120px]"
-                                    />
+                                    <EmptyStateIllustration className="mx-auto block w-[120px] h-[120px]" />
                                 </div>
-                                <p className="text-[14px] text-[#4E5969] mb-5">
+                                <p className="text-[14px] font-normal text-[#999999] mb-5">
                                     {localize("com_subscription.website_not_indexed") || localize("com_subscription.website_not_in_database_crawl")}
                                 </p>
                                 <div className="flex gap-3 justify-center">
                                     <Button
                                         variant="secondary"
                                         onClick={mgr.handleClearSearch}
-                                        className="h-8 rounded-[6px] min-w-[74px] inline-flex items-center justify-center leading-none border border-[#E5E6EB] bg-white text-[14px] !font-normal text-[#4E5969]"
+                                        className="h-8 rounded-md min-w-[74px] inline-flex items-center justify-center leading-none border border-[#E5E6EB] bg-white text-[14px] !font-normal text-[#4E5969]"
                                     >
                                         {localize("com_subscription.do_not_crawl")}
                                     </Button>
                                     <Button
                                         onClick={() => {
-                                            // 50 上限：已选 + 队列在跑的 = 阻断
-                                            if (mgr.pendingSources.length + queueInProgressCount >= MAX_SOURCES) {
-                                                showToast({
-                                                    message: localize("com_subscription.maximum_channel_source")
-                                                        || `已达频道 ${MAX_SOURCES} 个信源上限，无法再爬取`,
-                                                    severity: NotificationSeverity.WARNING,
-                                                });
-                                                return;
-                                            }
+                                            // No front-end source-count cap: the backend / external API-key
+                                            // quota is the source of truth and rejects over-quota subscriptions.
                                             onEnqueueCrawl(mgr.searchKeyword.trim());
                                             // 清搜索回 list 视图，并切到「网站」tab
                                             setInputValue("");
                                             mgr.handleClearSearch();
                                             mgr.setActiveTab("website");
                                         }}
-                                        className="h-8 rounded-[6px] min-w-[74px] inline-flex items-center justify-center leading-none text-[14px] !font-normal text-white bg-[#165DFF] hover:bg-[#4080FF]"
+                                        className="h-8 rounded-md min-w-[74px] inline-flex items-center justify-center leading-none text-[14px] !font-normal text-white bg-blue-500 hover:bg-blue-400 btn-brand-primary"
                                     >
                                         {localize("com_subscription.confirm_crawl")}
                                     </Button>
@@ -366,15 +395,23 @@ export function AddSourceDropdown({
                         {mgr.viewMode === "wechatProcessing" && (
                             <div className="flex min-h-full flex-col items-center justify-center px-4 py-8 text-center">
                                 <div className="mb-4">
-                                    <ChannelLoadingIcon className="w-[120px] h-[120px]" />
+                                    <CrawlingIllustration className="w-[120px] h-[120px]" />
                                 </div>
-                                <p className="text-[14px] text-[#4E5969] mb-5">
-                                    {localize("com_subscription.detect_wechat_link") || localize("com_subscription.official_account_link_detected_adding")}
-                                </p>
+                                {mgr.wechatLinkFailed ? (
+                                    <WechatLinkHint
+                                        className="mb-5 max-w-full whitespace-nowrap max-[767px]:whitespace-normal"
+                                        sentenceKey="com_subscription.wechat_link_retry_hint"
+                                        labelKey="com_subscription.wechat_link_label"
+                                    />
+                                ) : (
+                                    <p className="text-[14px] font-normal text-[#999999] mb-5">
+                                        {localize("com_subscription.detect_wechat_link") || localize("com_subscription.official_account_link_detected_adding")}
+                                    </p>
+                                )}
                                 <Button
                                     variant="secondary"
                                     onClick={mgr.handleClearSearch}
-                                    className="h-8 rounded-[6px] min-w-[84px] inline-flex items-center justify-center leading-none text-[14px] !font-normal border border-[#E5E6EB] bg-white text-[#4E5969]"
+                                    className="h-8 rounded-md min-w-[84px] inline-flex items-center justify-center leading-none text-[14px] !font-normal border border-[#E5E6EB] bg-white text-[#4E5969]"
                                 >
                                     {localize("com_subscription.do_not_add")}
                                 </Button>
@@ -383,7 +420,7 @@ export function AddSourceDropdown({
                         {mgr.viewMode === "list" && (
                             <>
                                 {displayList.length === 0 ? (
-                                    <div className="p-8 text-center text-[14px] text-[#86909C]">{localize("com_subscription.no_data")}</div>
+                                    <div className="flex min-h-full items-center justify-center p-8 text-center text-[14px] text-[#999999]">{localize("com_subscription.no_data")}</div>
                                 ) : (
                                     <div className="">
                                         {displayList.map((source) => {
@@ -396,7 +433,7 @@ export function AddSourceDropdown({
                                                     className={cn(
                                                         "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 cursor-pointer",
                                                         dis && "opacity-60 cursor-not-allowed",
-                                                        sel && "bg-[#E8F3FF]"
+                                                        sel && "bg-[#FBFBFB]"
                                                     )}
                                                 >
                                                     <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#F2F3F5]">
@@ -409,27 +446,24 @@ export function AddSourceDropdown({
                                                         )}
                                                     </div>
                                                     <span className="min-w-0 truncate text-[14px] text-[#1D2129]">
-                                                        <span
-                                                            className={cn(
-                                                                "inline-flex max-w-full items-center align-middle",
-                                                                source.type === "website" && source.url && "group/link text-[#1D2129] transition-colors"
-                                                            )}
-                                                        >
+                                                        {source.type === "website" && source.url ? (
+                                                            <WebsiteSourceLink
+                                                                name={source.name}
+                                                                url={source.url}
+                                                                maxLen={MAX_NAME_DISPLAY}
+                                                                onNavigate={(e) => {
+                                                                    e.stopPropagation();
+                                                                    window.open(source.url, "_blank");
+                                                                }}
+                                                            />
+                                                        ) : (
                                                             <span className="truncate">
                                                                 {truncateName(source.name, MAX_NAME_DISPLAY)}
                                                             </span>
-                                                            {source.type === "website" && source.url && (
-                                                                <ChannelRightSmallUpIcon
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        window.open(source.url, "_blank");
-                                                                    }}
-                                                                    className="ml-0.5 w-4 h-4 flex-shrink-0 opacity-0 transition-opacity group-hover/link:opacity-100" />
-                                                            )}
-                                                        </span>
+                                                        )}
                                                         {mgr.isSearchMode && (
                                                             <span
-                                                                className="ml-2 flex-shrink-0 rounded border border-[#165DFF] px-0.5 text-[11px] text-[#165DFF]"
+                                                                className="ml-2 flex-shrink-0 rounded border border-blue-500 px-0.5 text-[11px] text-blue-500"
                                                             >
                                                                 {source.type === "official_account"
                                                                     ? localize("com_subscription.official_account")
@@ -444,7 +478,7 @@ export function AddSourceDropdown({
                                                         <Checkbox
                                                             checked={sel}
                                                             onCheckedChange={() => !dis && mgr.toggleSource(source)}
-                                                            className="rounded border-[#C9CDD4] data-[state=checked]:bg-[#165DFF] data-[state=checked]:border-[#165DFF]"
+                                                            className="rounded border-[#C9CDD4] data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500"
                                                         />
                                                     </div>
                                                 </div>
@@ -456,10 +490,10 @@ export function AddSourceDropdown({
                         )}
                     </div>
                     {mgr.viewMode === "list" && (
-                        <div className="relative z-[221] flex shrink-0 items-center justify-between border-t border-[#E5E6EB] bg-white px-4 py-3">
-                            <span className="text-[12px] text-[#86909C]">{localize("com_subscription.total_channel_sources")}{mgr.pendingSources.length}/{MAX_SOURCES}
+                        <div className="relative z-10 flex shrink-0 items-center justify-between border-t border-[#E5E6EB] bg-white px-4 py-3 touch-mobile:flex-col touch-mobile:items-stretch touch-mobile:gap-2">
+                            <span className="text-[12px] text-[#999999]">{localize("com_subscription.total_channel_sources")}{mgr.pendingSources.length}/{MAX_SOURCES}
                             </span>
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 touch-mobile:w-full">
                                 <Button
                                     variant="secondary"
                                     size="sm"
@@ -472,7 +506,7 @@ export function AddSourceDropdown({
                                         if (!confirmed) return;
                                         mgr.handleCancel();
                                     }}
-                                    className="border border-[#E5E6EB] bg-white h-8 rounded-[6px] inline-flex items-center justify-center leading-none text-[14px] !font-normal text-[#4E5969]"
+                                    className="border border-[#E5E6EB] bg-white h-8 rounded-md inline-flex items-center justify-center leading-none text-[14px] !font-normal text-[#4E5969] touch-mobile:flex-1"
                                 >
                                     {localize("cancel")}
                                 </Button>
@@ -480,7 +514,7 @@ export function AddSourceDropdown({
                                     size="sm"
                                     onClick={mgr.handleConfirm}
                                     disabled={mgr.pendingSources.length === 0}
-                                    className="bg-[#165DFF] h-8 rounded-[6px] inline-flex items-center justify-center leading-none text-[14px] !font-normal text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="bg-blue-500 h-8 rounded-md inline-flex items-center justify-center leading-none text-[14px] !font-normal text-white disabled:opacity-50 disabled:cursor-not-allowed touch-mobile:flex-1 btn-brand-primary"
                                 >
                                     {localize("com_subscription.confirm_add")}
                                 </Button>
@@ -489,46 +523,6 @@ export function AddSourceDropdown({
                     )}
                 </div>
             )}
-
-            {/* 公众号添加失败弹窗 */}
-            <AlertDialog
-                open={mgr.wechatAddError}
-                onOpenChange={(open) => {
-                    if (!open) {
-                        mgr.setWechatAddError(false);
-                    }
-                }}
-            >
-                <AlertDialogContent className="max-w-[420px] rounded-2xl p-0 border-none shadow-[0_8px_24px_rgba(15,23,42,0.18)]">
-                    <div className="">
-                        <div className="flex items-start justify-between">
-                            <div className="flex items-center">
-                                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-[#FEECEC] ml-4 mr-3">
-                                    <XCircle className="size-4 text-[#F53F3F]" />
-                                </span>
-                                <AlertDialogHeader className="text-left mt-6">
-                                    <AlertDialogTitle className="text-[16px] font-semibold text-[#1D2129]">{localize("com_subscription.channel_add_failed")}</AlertDialogTitle>
-                                    <AlertDialogDescription className="mt-2 text-[14px] text-[#4E5969]">{localize("com_subscription.try_adding_again")}</AlertDialogDescription>
-                                </AlertDialogHeader>
-                            </div>
-                            <button
-                                type="button"
-                                className="mt-1 text-[#C9CDD4] hover:text-[#4E5969]"
-                                onClick={() => mgr.setWechatAddError(false)}
-                            >
-                                <X className="size-4" />
-                            </button>
-                        </div>
-                    </div>
-                    <div className="px-6 pb-4 flex justify-end">
-                        <AlertDialogAction
-                            onClick={() => mgr.setWechatAddError(false)}
-                            className="h-8 px-6 rounded-[6px] inline-flex items-center justify-center leading-none border border-[#E5E6EB] bg-white text-[14px] !font-normal text-[#4E5969] hover:bg-[#F7F8FA]"
-                        >{localize("com_subscription.cancel")}</AlertDialogAction>
-                    </div>
-                </AlertDialogContent>
-            </AlertDialog>
-
         </div>
     );
 }

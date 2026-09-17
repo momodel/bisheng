@@ -1,9 +1,12 @@
+// @ts-strict-ignore
 import throttle from 'lodash-es/throttle';
 import * as pdfjsLib from 'pdfjs-dist';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FixedSizeList as List, areEqual } from 'react-window';
 import { LoadingIcon } from '../bs-icons/loading';
+
+declare const __APP_ENV__: any;
 
 // A4 比例(itemSize：item的高度)
 // 595.32 * 841.92 采用宽高比0.70约束
@@ -139,7 +142,7 @@ const Row = React.memo(({ drawfont, index, style, size, labels, pdf, onLoad, onS
         }
     }
 
-    return <div className="bg-[#fff] border-b-2 overflow-hidden" style={style}>
+    return <div className="absolute bg-[#fff] border-b-2 overflow-hidden" style={style}>
         {/* <span className="absolute">{index + 1}</span> */}
         {/* canvas  */}
         <div ref={wrapRef} className="canvasWrapper"></div>
@@ -232,6 +235,18 @@ const DragPanne = ({ onMouseEnd }) => {
         </div>
     );
 };
+
+interface FileViewProps {
+    startIndex?: number;
+    drawfont?: boolean;
+    select?: boolean;
+    scrollTo?: [number, number];
+    fileUrl: string;
+    labels?: Record<string | number, { id: string; label: number[]; active: boolean }[]>;
+    onPageChange?: (offset: number, h: number, paperSize: number, scale: number) => void;
+    onSelectLabel?: (data: { id: string; active: boolean }[]) => void;
+}
+
 export default function FileView({
     startIndex = 1,
     drawfont = false,
@@ -241,12 +256,13 @@ export default function FileView({
     labels,
     onPageChange = (offset, h, paperSize, scale) => { },
     onSelectLabel = () => { }
-}) {
+}: FileViewProps) {
     const { t } = useTranslation()
     const paneRef = useRef(null)
     const listRef = useRef(null)
     const [boxSize, setBoxSize] = useState({ width: 0, height: 0 })
     const [loading, setLoading] = useState(false)
+    const [loadError, setLoadError] = useState(false)
 
     // 视口
     useEffect(() => {
@@ -254,7 +270,7 @@ export default function FileView({
 
         const throttledResizeHandler = throttle(entries => {
             if (panneDom) {
-                for (let entry of entries) {
+                for (const entry of entries) {
                     const [width, height] = [entry.contentRect.width, entry.contentRect.height];
                     setBoxSize({ width, height });
                     const warpDom = document.getElementById('warp-pdf');
@@ -280,6 +296,7 @@ export default function FileView({
     useEffect(() => {
         // loding
         setLoading(true)
+        setLoadError(false)
         // sass环境使用sass地址
         const pdfUrl = fileUrl.replace(/https?:\/\/[^\/]+/, __APP_ENV__.BASE_URL);  // '/doc.pdf';
 
@@ -299,6 +316,11 @@ export default function FileView({
             pageScale = Math.min(pageScale, viewport.width / viewport.height)
             setPdf(pdfDocument)
             setLoading(false)
+        }).catch((error) => {
+            console.error('Failed to load PDF preview:', error);
+            setPdf(null)
+            setLoading(false)
+            setLoadError(true)
         })
     }, [fileUrl])
 
@@ -340,7 +362,7 @@ export default function FileView({
             const pagelabels = labels[key]
             pagelabels.forEach(item => {
                 const [sx, sy, ex, ey] = item.label
-                const pageH = (key - startIndex) * (boxSize.width / pageScale * scale)
+                const pageH = (Number(key) - startIndex) * (boxSize.width / pageScale * scale)
                 if (x <= sx && y <= sy + pageH && x1 >= ex && y1 >= ey + pageH) {
                     console.log('item.id :>> ', item.id);
                     selects.push({ id: item.id, active: !item.active })
@@ -367,7 +389,7 @@ export default function FileView({
         onSelectLabel={val => select && onSelectLabel([val])}
     ></Row>, [pdf, drawfont, select, labels, boxSize]);
 
-    return <div ref={paneRef} className="flex-1 h-full bg-gray-100 rounded-md py-4 px-2 relative"
+    return <div ref={paneRef} className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-gray-100 rounded-md py-4 px-2 relative"
         onContextMenu={(e) => e.preventDefault()}
     >
         {
@@ -375,19 +397,23 @@ export default function FileView({
                 ? <div className="absolute w-full h-full top-0 left-0 flex justify-center items-center z-10 bg-[rgba(255,255,255,0.6)] dark:bg-blur-shared">
                     <LoadingIcon />
                 </div>
-                : <div id="warp-pdf" className="file-view absolute">
-                    <List
-                        ref={listRef}
-                        itemCount={pdf?.numPages || 100}
-                        itemSize={boxSize.width / pageScale}
-                        // 滚动区盒子大小
-                        width={boxSize.width}
-                        height={boxSize.height}
-                        onScroll={handleScroll}
-                    >
-                        {itemRenderer}
-                    </List>
-                </div>
+                : loadError
+                    ? <div className="flex h-full w-full items-center justify-center text-gray-400">
+                        {t('file.previewNotAvailable', { ns: 'knowledge' })}
+                    </div>
+                    : <div id="warp-pdf" className="file-view relative h-full w-full overflow-hidden">
+                        <List
+                            ref={listRef}
+                            itemCount={pdf?.numPages || 100}
+                            itemSize={boxSize.width / pageScale}
+                            // 滚动区盒子大小
+                            width={boxSize.width}
+                            height={boxSize.height}
+                            onScroll={handleScroll}
+                        >
+                            {itemRenderer}
+                        </List>
+                    </div>
         }
         {select && <DragPanne onMouseEnd={hanleDragSelectLabel} />}
     </div>

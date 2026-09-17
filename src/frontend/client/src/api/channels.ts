@@ -1,4 +1,18 @@
 import request from "./request";
+import { mapInitialPermissionResult } from "./permission";
+import type {
+    InitialPermissionResult,
+    InitialPermissionsPayload,
+    RawInitialPermissionResult,
+} from "./permission";
+
+function unwrapChannelPermissionPayload<T>(response: any): T {
+    const statusCode = response?.status_code ?? response?.code ?? 200;
+    if (statusCode !== 200) {
+        throw new Error(response?.status_message || response?.message || `Channel request failed: ${statusCode}`);
+    }
+    return (response?.data ?? response) as T;
+}
 
 // 排序方式
 export enum SortType {
@@ -12,6 +26,35 @@ export enum ChannelRole {
     CREATOR = "creator",      // 创建者
     ADMIN = "admin",          // 管理员
     MEMBER = "member"         // 普通成员
+}
+
+export type ChannelAction =
+    | "visible"
+    | "edit"
+    | "manage_permission"
+    | "delete"
+    | string;
+
+function hasAction(actions: ChannelAction[] | null | undefined, action: ChannelAction): boolean {
+    return Array.isArray(actions) && actions.includes(action);
+}
+
+export function canEditChannelSettings(
+    actions?: ChannelAction[] | null,
+): boolean {
+    return hasAction(actions, "edit");
+}
+
+export function canManageChannelPermissions(
+    actions?: ChannelAction[] | null,
+): boolean {
+    return hasAction(actions, "manage_permission");
+}
+
+export function canDeleteChannel(
+    actions?: ChannelAction[] | null,
+): boolean {
+    return hasAction(actions, "delete");
 }
 
 // 子频道接口
@@ -31,7 +74,8 @@ export interface Channel {
     subscriberCount: number;   // 订阅人数
     articleCount: number;      // 文章数量
     unreadCount: number;       // 未读数量
-    role: ChannelRole;         // 当前用户的角色
+    role: ChannelRole;         // 当前用户的业务角色（授权以 actions 为准）
+    actions?: ChannelAction[];
     isPinned: boolean;         // 是否置顶
     createdAt: string;         // 创建时间
     updatedAt: string;         // 最近更新时间
@@ -44,7 +88,7 @@ export interface Article {
     id: string;
     title: string;
     url: string;               // 原文链接
-    content: string;           // 正文（纯文本）
+    content: string;           // 列表摘要文本
     content_html?: string;     // HTML 内容
     summary?: string;          // 摘要
     coverImage?: string;       // 封面图
@@ -58,6 +102,20 @@ export interface Article {
     createdAt: string;         // 创建时间（加入频道的时间）
     highlight?: Record<string, string[]>;  // 搜索高亮
     source_type?: number;      // 信源类型: 0-公众号 1-网站
+    sensitiveReview?: ArticleSensitiveReview;
+}
+
+export interface ArticleSensitiveHit {
+    word: string;
+    count: number;
+}
+
+export interface ArticleSensitiveReview {
+    enabled: boolean;
+    violated: boolean;
+    hits: ArticleSensitiveHit[];
+    can_view: boolean;
+    auto_reply?: string;
 }
 
 // Backend article search result item
@@ -66,8 +124,8 @@ export interface ArticleSearchResultItem {
     source_type: number;       // 0-公众号 1-网站
     source_id: string;
     title: string;
-    content: string;           // May contain HTML markup
-    content_html: string;      // Full HTML content
+    content_preview: string;   // Search list preview
+    content_html?: string;     // Detail-only HTML content
     cover_image?: string;
     publish_time?: string;
     source_url?: string;
@@ -76,6 +134,7 @@ export interface ArticleSearchResultItem {
     score?: number;
     highlight?: Record<string, string[]>;
     is_read?: boolean;
+    sensitive_review?: ArticleSensitiveReview;
     source_info?: {
         id: string;
         source_name: string;
@@ -101,7 +160,8 @@ export interface ChannelItemResponse {
     is_released: boolean;
     latest_article_update_time?: string;
     create_time?: string;
-    user_role: "creator" | "admin" | "member";
+    user_role: ChannelRole;
+    actions?: ChannelAction[];
     is_pinned: boolean;
     subscribed_at?: string;
     unread_count?: number;
@@ -119,7 +179,8 @@ export interface ChannelDetailResponse {
     create_time?: string;
     creator_name: string;
     subscriber_count: number;
-    subscription_status:string;
+    subscription_status: string;
+    actions?: ChannelAction[];
     article_count: number;
     filter_rules?: ManagerChannelFilterRule[];
     source_infos?: Array<{
@@ -130,6 +191,8 @@ export interface ChannelDetailResponse {
         icon?: string;
         source_type?: string;
     }>;
+    /** v2.5 Module D — only populated for the channel creator. */
+    knowledge_sync?: KnowledgeSyncConfig | null;
 }
 
 /**
@@ -153,17 +216,19 @@ export async function getChannelsApi(params: {
     return (Array.isArray(data) ? data : []).map((item: any) => ({
         id: item.id,
         name: item.name,
-        creator: "",
-        creatorId: "",
-        subscriberCount: 0,
-        articleCount: 0,
+        description: item.description,
+        creator: item.creator_name ?? "",
+        creatorId: String(item.creator_id ?? ""),
+        subscriberCount: Number(item.subscriber_count ?? 0),
+        articleCount: Number(item.article_count ?? 0),
         unreadCount: item.unread_count || 0,
         role: item.user_role as ChannelRole,
+        actions: Array.isArray(item.actions) ? item.actions : [],
         isPinned: item.is_pinned,
         createdAt: item.create_time,
         updatedAt: item.latest_article_update_time || item.update_time,
         subChannels: [],
-        ...item,
+        source_list: item.source_list,
     }));
 }
 
@@ -186,7 +251,7 @@ export async function updateChannelApi(
     channelId: string,
     data: any
 ): Promise<any> {
-    const res: any = await request.put(`/api/v1/channel/manager/${channelId}`, data, { showError: true });
+    const res: any = await request.put(`/api/v1/channel/manager/${channelId}`, data, { showError: true } as any);
     return res;
 }
 
@@ -203,7 +268,7 @@ export async function subscribeChannelApi(channelId: string): Promise<void> {
  */
 export async function unsubscribeChannelApi(channelId: string): Promise<any> {
     const res: any = await request.post(`/api/v1/channel/manager/${channelId}/unsubscribe`);
-    return res?.data ?? res;
+    return res;
 }
 
 /**
@@ -258,8 +323,10 @@ export async function getArticlesApi(params: {
  * 获取文章详情
  * GET /api/v1/channel/manager/articles/detail/{article_id}
  */
-export async function getArticleDetailApi(articleId: string): Promise<ArticleSearchResultItem> {
-    const res: any = await request.get(`/api/v1/channel/manager/articles/detail/${articleId}`);
+export async function getArticleDetailApi(articleId: string, channelId: string): Promise<ArticleSearchResultItem> {
+    const res: any = await request.get(`/api/v1/channel/manager/articles/detail/${articleId}`, {
+        params: { channel_id: channelId }
+    });
     return res?.data ?? res;
 }
 
@@ -270,6 +337,16 @@ export async function getArticleDetailApi(articleId: string): Promise<ArticleSea
 export async function getChannelDetailApi(channelId: string): Promise<ChannelDetailResponse> {
     const res: any = await request.get(`/api/v1/channel/manager/${channelId}`);
     return res?.data ?? res;
+}
+
+/**
+ * 获取频道各子频道未读数量（F040：从详情接口拆出，预览/详情路径不再承担逐用户 ES 成本）。
+ * Fetch per-sub-channel unread counts for the current user, keyed by sub-channel name.
+ * Lazily called only inside the in-channel view to fill unread badges.
+ */
+export async function getChannelUnreadCountsApi(channelId: string): Promise<Record<string, number>> {
+    const res: any = await request.get(`/api/v1/channel/manager/${channelId}/unread-counts`);
+    return res?.data ?? res ?? {};
 }
 
 /**
@@ -378,6 +455,16 @@ export interface CreateManagerChannelPayload {
     filter_rules: ManagerChannelFilterRule[]; // 筛选规则（必填）
     channel_type?: string;                // 频道类型（可选）
     is_released?: boolean;                // 是否发布（可选）
+    /** v2.5 Module D — saved atomically with the channel. */
+    knowledge_sync?: KnowledgeSyncConfig;
+    initialPermissions?: InitialPermissionsPayload;
+    creationRequestId?: string;
+}
+
+export interface CreateManagerChannelResult {
+    id: string;
+    initialPermissionResult?: InitialPermissionResult;
+    [key: string]: unknown;
 }
 
 /**
@@ -386,8 +473,34 @@ export interface CreateManagerChannelPayload {
  */
 export async function createManagerChannelApi(
     data: CreateManagerChannelPayload
-): Promise<any> {
-    return await request.post(`/api/v1/channel/manager/create`, data, { showError: true });
+): Promise<CreateManagerChannelResult> {
+    const { initialPermissions, creationRequestId, ...channelData } = data;
+    const body = {
+        ...channelData,
+        ...(creationRequestId ? { creation_request_id: creationRequestId } : {}),
+        ...(initialPermissions ? { initial_permissions: initialPermissions } : {}),
+    };
+    const response = await request.post(
+        `/api/v1/channel/manager/create`,
+        body,
+        { showError: true } as any,
+    );
+    const raw = unwrapChannelPermissionPayload<
+        Record<string, unknown> & {
+            id?: string;
+            initial_permission_result?: RawInitialPermissionResult | null;
+        }
+    >(response);
+    if (!raw || raw.id === undefined || raw.id === null) {
+        throw new Error("createManagerChannelApi: missing data");
+    }
+    const { initial_permission_result: rawPermissionResult, ...channel } = raw;
+    const initialPermissionResult = mapInitialPermissionResult(rawPermissionResult);
+    return {
+        ...channel,
+        id: String(raw.id),
+        ...(initialPermissionResult ? { initialPermissionResult } : {}),
+    };
 }
 
 /**
@@ -434,7 +547,8 @@ export async function searchManagerSourcesApi(params: {
 }
 
 export async function getFeedbackTips(): Promise<any> {
-    return await request.get(`/api/v1/workstation/config/subscription`);
+    const res: any = await request.get(`/api/v1/workstation/config/subscription`);
+    return res?.data ?? res;
 }
 /**
  * POST /api/v1/channel/manager/add_website_source
@@ -460,8 +574,11 @@ export async function addWechatSourceApi(body: {
     [key: string]: any;
 }, options?: any): Promise<any> {
     // options supports AbortController signal, e.g. { signal }
+    // showError is off on purpose: failures are surfaced by the caller's own
+    // "link not recognized" dialog + inline guidance, so the generic red toast
+    // would only duplicate it.
     return await request.post(`/api/v1/channel/manager/add_wechat_source`, body, {
-        showError: true,
+        showError: false,
         ...options,
     });
 }
@@ -494,13 +611,24 @@ export async function getChannelSquareApi(params?: {
 }
 
 /**
+ * GET /api/v1/channel/manager/recommend
+ * 首页空状态推荐：按内容数降序的公开频道（轮播用）。
+ * 返回 { data: ChannelSquareItem[], total }，total 为满足条件的公开频道数。
+ */
+export async function getRecommendedChannelsApi(params?: {
+    limit?: number;
+}): Promise<any> {
+    return await request.get(`/api/v1/channel/manager/recommend`, { params });
+}
+
+/**
  * POST /api/v1/channel/manager/subscribe
  * 订阅频道申请
  */
 export async function subscribeManagerChannelApi(body: {
     channel_id: string;
 }): Promise<any> {
-    return await request.post(`/api/v1/channel/manager/subscribe`, body, { showError: true });
+    return await request.post(`/api/v1/channel/manager/subscribe`, body, { showError: true } as any);
 }
 
 // 频道成员
@@ -508,7 +636,7 @@ export interface ChannelMember {
     user_id: number;
     user_name: string;
     avatar?: string;
-    role: "creator" | "admin" | "member";
+    role: ChannelRole;
     groups?: string[];
 }
 
@@ -561,6 +689,35 @@ export async function removeChannelMemberApi(body: {
     user_id: number;
 }): Promise<any> {
     return await request.post(`/api/v1/channel/manager/remove_member`, body);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// v2.5 Module D — Channel ➜ Knowledge Space sync configuration types.
+// Persisted atomically with the channel itself: the shapes below are sent as
+// the `knowledge_sync` field on create/update and returned on detail.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface KnowledgeSyncSpaceItem {
+    knowledge_space_id: string;
+    knowledge_space_name?: string | null;
+    folder_id?: string | null;
+    folder_path?: string | null;
+}
+
+export interface KnowledgeSyncMainConfig {
+    enabled: boolean;
+    spaces: KnowledgeSyncSpaceItem[];
+}
+
+export interface KnowledgeSyncSubConfig {
+    sub_channel_name: string;
+    enabled: boolean;
+    spaces: KnowledgeSyncSpaceItem[];
+}
+
+export interface KnowledgeSyncConfig {
+    main: KnowledgeSyncMainConfig;
+    subs: KnowledgeSyncSubConfig[];
 }
 
 // ── Information Source types (migrated from ~/mock/sources) ──

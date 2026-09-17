@@ -1,6 +1,5 @@
-import { Check, X } from "lucide-react";
-import LingsiIcon from '~/components/ui/icon/Lingsi';
-import TodayItemIcon from '~/components/ui/icon/TodayItem';
+// @ts-strict-ignore
+import { Outlined } from "bisheng-icons";
 import type { FocusEvent, KeyboardEvent, MouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -12,9 +11,10 @@ import {
 } from "~/hooks/queries/data-provider";
 import type { TConversation } from "~/types/chat";
 import { Constants } from "~/types/chat";
-import { useLocalize, useMediaQuery, useNavigateToConvo } from "~/hooks";
+import { useLocalize, usePrefersMobileLayout, useNavigateToConvo } from "~/hooks";
 import { useToastContext } from "~/Providers";
 import store from "~/store";
+import { conversationTaskRunningState } from "~/store/linsight";
 import { cn } from "~/utils";
 import { ConvoOptions } from "./ConvoOptions";
 
@@ -47,11 +47,17 @@ export default function Conversation({
   const { navigateWithLastTools } = useNavigateToConvo();
   const { showToast } = useToastContext();
   const { conversationId, title } = conversation;
+  // Task-mode execution indicator: true while this conversation's linsight
+  // session is still running, driving the sidebar spinner.
+  const isTaskRunning = useRecoilValue(
+    conversationTaskRunningState(conversationId ?? "")
+  );
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const renameActionsRef = useRef<HTMLDivElement | null>(null);
   const [titleInput, setTitleInput] = useState(title);
   const [renaming, setRenaming] = useState(false);
   const [isPopoverActive, setIsPopoverActive] = useState(false);
-  const isSmallScreen = useMediaQuery("(max-width: 768px)");
+  const isSmallScreen = usePrefersMobileLayout();
   const localize = useLocalize();
   const navigate = useNavigate();
 
@@ -89,7 +95,8 @@ export default function Conversation({
 
   useEffect(() => {
     if (renaming && inputRef.current) {
-      inputRef.current.focus();
+      // Select the whole title so typing replaces it directly.
+      inputRef.current.select();
     }
   }, [renaming]);
 
@@ -99,6 +106,11 @@ export default function Conversation({
     ) => {
       e.preventDefault();
       setRenaming(false);
+      // An empty (or whitespace-only) name silently restores the previous one.
+      if (!titleInput?.trim()) {
+        setTitleInput(title);
+        return;
+      }
       if (titleInput === title) {
         return;
       }
@@ -147,13 +159,15 @@ export default function Conversation({
     [title, onRename]
   );
 
-  const cancelRename = useCallback(
-    (e: MouseEvent<HTMLButtonElement>) => {
-      e.preventDefault();
-      setTitleInput(title);
-      setRenaming(false);
+  const handleRenameBlur = useCallback(
+    (e: FocusEvent<HTMLInputElement>) => {
+      const nextFocused = e.relatedTarget as Node | null;
+      if (nextFocused && renameActionsRef.current?.contains(nextFocused)) {
+        return;
+      }
+      onRename(e);
     },
-    [title]
+    [onRename]
   );
 
   const isActiveConvo: boolean = useMemo(
@@ -169,53 +183,54 @@ export default function Conversation({
   return (
     <div
       className={cn(
-        "group relative w-full content-stretch flex gap-[8px] items-center mb-1 px-[12px] py-[6px] rounded-lg shrink-0 transition-colors",
-        isActiveConvo ? "bg-[#e6edfc]" : "hover:bg-[#f7f7f7]",
-        renaming ? "bg-[#e6edfc]" : "",
-        isSmallScreen ? "py-[8px]" : ""
+        "group relative w-full content-stretch flex gap-[8px] items-center mb-1 rounded-lg shrink-0 transition-colors",
+        // Mobile rows: 8px left / 6px right, 8px vertical (desktop nav uses 12px/6px).
+        isSmallScreen ? "pl-[8px] pr-[6px] py-[8px]" : "px-[12px] py-[6px]",
+        isActiveConvo ? "bg-[#EEE]" : "hover:bg-fill-1",
+        // Pin the hover fill while the row owns a transient UI — an open
+        // options menu or the rename input — since the pointer leaves the row
+        // (into the menu) long before the interaction is over. Never promoted
+        // to the active row's fill: this row is not the open conversation.
+        !isActiveConvo && (renaming || isPopoverActive) && "bg-fill-1",
+        // Renaming chrome matches the chat input surface (AiChatInput): 1px
+        // #ECECEC hairline + soft drop shadow, both as shadows so the row
+        // keeps its borderless box size.
+        renaming && "shadow-[0_0_0_1px_#ECECEC,0_0_8px_rgba(3,7,117,0.05)]",
       )}
     >
       {renaming ? (
-        <div className="flex h-6 grow cursor-pointer items-center gap-[8px] overflow-hidden whitespace-nowrap break-all">
+        <div className="flex h-5 grow cursor-pointer items-center gap-[8px] overflow-hidden whitespace-nowrap break-all">
           <input
             ref={inputRef}
             type="text"
-            className="w-full rounded bg-white px-1 text-[14px] leading-tight focus-visible:outline-none text-[#212121]"
+            className="w-full bg-transparent text-[14px] leading-[20px] focus-visible:outline-none text-[#1A1A1A]"
             value={titleInput ?? ""}
             onChange={(e) => setTitleInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onBlur={handleRenameBlur}
             aria-label={`${localize("com_ui_rename")} ${localize(
               "com_ui_chat"
             )}`}
           />
-          <div className="flex gap-1">
-            <button
-              onClick={cancelRename}
-              aria-label={`${localize("com_ui_cancel")} ${localize(
-                "com_ui_rename"
-              )}`}
-            >
-              <X
-                aria-hidden={true}
-                className="h-4 w-4 transition-colors duration-200 ease-in-out hover:opacity-70"
-              />
-            </button>
+          <div ref={renameActionsRef} className="flex gap-1">
             <button
               onClick={onRename}
+              className="flex h-4 w-4 items-center justify-center"
               aria-label={`${localize("com_ui_submit")} ${localize(
                 "com_ui_rename"
               )}`}
             >
-              <Check
+              <Outlined.Check
                 aria-hidden={true}
-                className="h-4 w-4 transition-colors duration-200 ease-in-out hover:opacity-70"
+                size={12}
+                className="transition-colors duration-200 ease-in-out hover:opacity-70"
               />
             </button>
           </div>
         </div>
       ) : (
         <a
-          // 切换会话
+          // Toggle conversation
           // href={`/c/${conversationId}`}
           data-testid="convo-item"
           onClick={clickHandler}
@@ -240,25 +255,52 @@ export default function Conversation({
             }}
             alt={conversation?.flowType}
           >
-            {conversation?.flowType === 20 ? (
-              <LingsiIcon className="size-[24px] shrink-0" />
-            ) : (
-              <TodayItemIcon className="size-[24px] shrink-0 text-[#6B778D]" />
-            )}
-            <span className="text-[#212121] text-[14px] leading-[20px] font-['PingFang_SC:Regular',sans-serif] truncate">
+            {/* F035: conversation list no longer distinguishes daily vs task
+                mode — the leading icon is removed for both (unified list). */}
+            <span className="text-[#1A1A1A] text-[14px] leading-[20px] font-normal truncate">
               {title}
             </span>
           </div>
         </a>
       )}
+      {/* While renaming, drop the options slot entirely — an empty flex item
+          would still cost the row an extra 8px gap before the right padding. */}
+      {!renaming && (
       <div
         className={cn(
-          isPopoverActive || isActiveConvo
-            ? "flex"
-            : "hidden group-focus-within:flex group-hover:flex"
+          isSmallScreen
+            ? "flex w-[48px] justify-end items-center shrink-0"
+            : // While running, keep the slot visible so the spinner shows without
+              // hover; otherwise reveal the options menu on hover / when active.
+              isPopoverActive || isActiveConvo || isTaskRunning
+              ? "flex items-center"
+              : "hidden items-center group-focus-within:flex group-hover:flex",
+          "coarse-pointer:flex",
         )}
       >
-        {!renaming && (
+        {isTaskRunning && (
+          // Task-mode running indicator: a body-colored spinner that yields the
+          // slot to the options menu on hover (or when its popover is open).
+          <Outlined.Loading
+            size={16}
+            className={cn(
+              "shrink-0 animate-spin",
+              isPopoverActive
+                ? "hidden"
+                : "group-hover:hidden group-focus-within:hidden",
+            )}
+            style={{ color: "#1A1A1A" }}
+          />
+        )}
+        <div
+          className={cn(
+            // When running, the menu is hover-only so it swaps in for the
+            // spinner; otherwise it always fills this (already hover-gated) slot.
+            isTaskRunning && !isPopoverActive
+              ? "hidden group-focus-within:flex group-hover:flex"
+              : "flex",
+          )}
+        >
           <ConvoOptions
             title={title}
             retainView={retainView}
@@ -268,8 +310,9 @@ export default function Conversation({
             isPopoverActive={isPopoverActive}
             setIsPopoverActive={setIsPopoverActive}
           />
-        )}
+        </div>
       </div>
+      )}
     </div>
   );
 }

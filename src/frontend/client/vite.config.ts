@@ -1,4 +1,6 @@
 import react from '@vitejs/plugin-react';
+import { readFileSync } from 'node:fs';
+import * as http from 'node:http';
 import path from 'path';
 import { visualizer } from "rollup-plugin-visualizer";
 import type { Plugin } from 'vite';
@@ -9,32 +11,140 @@ import { VitePWA } from 'vite-plugin-pwa';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { createHtmlPlugin } from 'vite-plugin-html';
 
+/**
+ * Build stamp shown on the crash screen: package version plus the minute the
+ * bundle was built, e.g. `v3.0.0-beta1 (20260807-2132)`. Local time on purpose —
+ * it is read by whoever built it, alongside a release log kept in the same zone.
+ */
+function buildVersion(): string {
+  const pkg = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+  return `v${pkg.version} (${stamp})`;
+}
+
 const prefix = process.env.PROJECT_PROXY_PREFIX || '/mo-agent';
 const app_env = {
   BASE_URL: `${prefix}/workspace`,
   BISHENG_HOST: `${(prefix === '/' || prefix === '') ? '' : prefix.replace(/^\//, '') + '/'}build/apps`
 }
+
+const minioPathRE = /^\/(?:workspace\/)?(?:bisheng|tmp-dir)(?:\/|$)/;
+
+// Emit one loud, actionable warning the first time MinIO answers a proxied
+// object request with 403. For presigned (SigV4) URLs to the public bucket a
+// 403 is almost always SignatureDoesNotMatch: the dev proxy forwards Host =
+// <proxy target host>, but the URL was signed for the backend `sharepoint`
+// host. The classic trap is `127.0.0.1` vs `localhost` (not interchangeable for
+// signing). Without this, the only symptom is silently broken images.
+let warnedMinio403 = false;
+function warnMinioSignatureMismatch(envVar: string, targetHost: string, requestUrl: string): void {
+  if (warnedMinio403) return;
+  warnedMinio403 = true;
+  console.warn(
+    `\n\x1b[33m[bisheng:minio-proxy] ⚠️  MinIO returned 403 for "${requestUrl}".\n` +
+    `  Almost certainly a SigV4 host mismatch: the dev proxy forwards Host=${targetHost},\n` +
+    `  but the presigned URL was signed for a different host.\n` +
+    `  Fix: set ${envVar} so its host EXACTLY equals backend config.yaml\n` +
+    `  object_storage.minio.sharepoint  (note: 127.0.0.1 ≠ localhost).\x1b[0m\n`,
+  );
+}
+
+function minioFileProxyPlugin(minioTarget: string): Plugin {
+  const minioTargetHost = new URL(minioTarget).host;
+  return {
+    name: 'bisheng:minio-file-proxy',
+    apply: 'serve',
+    configureServer(server) {
+      console.log(
+        `[bisheng:minio-proxy] dev object proxy -> ${minioTarget} ` +
+        `(host must equal backend sharepoint; 127.0.0.1 ≠ localhost)`,
+      );
+      const minioProxyMiddleware = (req, res, next) => {
+        const requestUrl = req.url || '';
+
+        if (!minioPathRE.test(requestUrl)) {
+          next();
+          return;
+        }
+
+        const rewrittenUrl = requestUrl.replace(/^\/workspace(?=\/(?:bisheng|tmp-dir)(?:\/|$))/, '');
+        const targetUrl = new URL(rewrittenUrl, minioTarget);
+        const proxyReq = http.request(
+          {
+            protocol: targetUrl.protocol,
+            hostname: targetUrl.hostname,
+            port: targetUrl.port,
+            method: req.method,
+            path: `${targetUrl.pathname}${targetUrl.search}`,
+            headers: {
+              ...req.headers,
+              host: targetUrl.host,
+            },
+          },
+          (proxyRes) => {
+            if (proxyRes.statusCode === 403) {
+              warnMinioSignatureMismatch('VITE_DEV_MINIO_TARGET', minioTargetHost, requestUrl);
+            }
+            res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+            proxyRes.pipe(res);
+          },
+        );
+
+        proxyReq.on('error', (error) => {
+          if (!res.headersSent) {
+            res.writeHead(502, { 'Content-Type': 'text/plain' });
+          }
+          res.end(`MinIO proxy error: ${error.message}`);
+        });
+
+        req.pipe(proxyReq);
+      };
+
+      server.middlewares.stack.unshift({
+        route: '',
+        handle: minioProxyMiddleware,
+      });
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command, mode }) => {
-  const env = loadEnv(mode, path.resolve(__dirname, '../'), ['VITE_']);
+  const env = loadEnv(mode, path.join(__dirname, '..'));
+  // MinIO object proxy for bucket paths (/bisheng/...): these must reach MinIO,
+  // NOT the backend (7860 only 404s on object keys). Override per environment via
+  // VITE_DEV_MINIO_TARGET, whose host MUST match the backend `sharepoint` config —
+  // SigV4 presigned URLs sign the Host header, so a mismatch yields 403
+  // SignatureDoesNotMatch (e.g. set http://localhost:9000 when sharepoint=localhost:9000).
+  const minioTarget = env.VITE_DEV_MINIO_TARGET || 'http://127.0.0.1:9000';
+  const apiTarget = env.VITE_DEV_API_TARGET || 'http://127.0.0.1:7860';
+  // Per-request proxy logging is opt-in (VITE_PROXY_LOG=1): on by default it prints
+  // dozens of lines per page load and buries the warnings that matter.
+  const proxyLog = env.VITE_PROXY_LOG === '1';
+
   return {
     base: app_env.BASE_URL || '/',
     define: {
       __APP_ENV__: JSON.stringify(app_env),
+      // vconsole ships ONLY when explicitly requested (npm run build:vconsole,
+      // which sets VITE_ENABLE_VCONSOLE=true). A plain `npm run build` never
+      // bundles the debug console — do not hardcode this back to 'true'.
       __VCONSOLE_ENABLED__: JSON.stringify(env.VITE_ENABLE_VCONSOLE === 'true'),
+      // Stamped at build time so a crash report names the exact build it came
+      // from. /api/v1/env carries a hardcoded version and cannot be trusted for
+      // this; the package version plus the build minute can.
+      __APP_VERSION__: JSON.stringify(buildVersion()),
     },
     server: {
       host: '0.0.0.0',
       port: 4001,
-      strictPort: false,
+      // Pin to 4001: fail loudly if the port is taken instead of drifting to 4002+.
+      strictPort: true,
       proxy: {
-        // '^/api/': {
-        //   target: 'http://192.168.106.116:7861',
-        //   // target: 'http://localhost:3080',
-        //   changeOrigin: true,
-        // },
         [`^(${app_env.BASE_URL})?/bisheng`]: {
-          target: 'http://10.52.3.75:7860',
+          target: minioTarget,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => {
@@ -42,21 +152,23 @@ export default defineConfig(({ command, mode }) => {
           },
         },
         [`${app_env.BASE_URL}/api`]: {
-          target: 'http://10.52.3.75:7860',
+          target: apiTarget,
           changeOrigin: true,
           secure: false,
           ws: true,
           configure: (proxy, options) => {
-            proxy.on('proxyReq', (proxyReq, req, res) => {
-              console.log('Proxying request to:', proxyReq.path);
-            });
+            if (proxyLog) {
+              proxy.on('proxyReq', (proxyReq, req, res) => {
+                console.log('Proxying request to:', proxyReq.path);
+              });
+            }
           },
           rewrite: (path) => {
             return path.replace(new RegExp(`^${app_env.BASE_URL}`), '');
           },
         },
         [`${app_env.BASE_URL}/tmp-dir`]: {
-          target: 'http://10.52.3.75:7860',
+          target: minioTarget,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => {
@@ -69,6 +181,7 @@ export default defineConfig(({ command, mode }) => {
     envDir: '../',
     envPrefix: ['VITE_', 'SCRIPT_', 'DOMAIN_', 'ALLOW_'],
     plugins: [
+      minioFileProxyPlugin(minioTarget),
       react(),
       nodePolyfills(),
       VitePWA({
@@ -89,7 +202,7 @@ export default defineConfig(({ command, mode }) => {
             'manifest.webmanifest',
           ],
           globIgnores: ['images/**/*', '**/*.map', 'index.html'],
-          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           navigateFallbackDenylist: [/^\/oauth/],
         },
         includeAssets: [],
@@ -133,18 +246,25 @@ export default defineConfig(({ command, mode }) => {
       compression({
         threshold: 10240,
       }),
-      createHtmlPlugin({}),
-      {
-        name: 'clear-placeholder',
-        transformIndexHtml(html) {
-          return html.replace('PROTOCAL_IGNORE/', '/');
-        }
-      },
+      createHtmlPlugin({
+        inject: {
+          data: {
+            baseUrl: app_env.BASE_URL.replace(/\/$/, ''),
+          },
+        },
+      }),
       viteStaticCopy({
         targets: [
           {
             src: 'node_modules/pdfjs-dist/build/pdf.worker.min.js',
             dest: './'
+          },
+          {
+            // Full CMap set for PDFs using CID-keyed, non-embedded CJK fonts
+            // (e.g. GBK-EUC-H from CEB-converted government docs) — without the
+            // matching .bcmap the text layer renders blank.
+            src: 'node_modules/pdfjs-dist/cmaps/*',
+            dest: 'cmaps/'
           }
         ]
       }),
@@ -155,9 +275,26 @@ export default defineConfig(({ command, mode }) => {
     ],
     publicDir: './public',
     build: {
+      // pnpm workspace: deps live in ../node_modules (outside this vite root),
+      // which defeats vite-plugin-node-polyfills' node_modules exemption — its
+      // injected ESM imports land inside CJS deps (react, react-dom) and break
+      // rollup's named-export detection. Let the commonjs plugin transform
+      // mixed ESM/CJS modules so named exports survive the injection.
+      commonjsOptions: {
+        transformMixedEsModules: true,
+      },
       sourcemap: process.env.NODE_ENV === 'development',
       outDir: './build',
       minify: 'terser',
+      // Strip all console.* / debugger from production bundles so no debug data
+      // (API payloads, tokens, filenames) leaks to the browser console. The
+      // vconsole debug build keeps them so its panel stays useful.
+      terserOptions: {
+        compress: {
+          drop_console: env.VITE_ENABLE_VCONSOLE !== 'true',
+          drop_debugger: true,
+        },
+      },
       rollupOptions: {
         preserveEntrySignatures: 'strict',
         output: {
@@ -324,6 +461,12 @@ export default defineConfig(({ command, mode }) => {
         '~': path.join(__dirname, 'src/'),
         '@': path.join(__dirname, 'src/'),
         $fonts: path.resolve(__dirname, 'public/fonts'),
+        // SUL-licensed nodebox is unused (only static/react-ts templates); stub it out of the bundle.
+        '@codesandbox/nodebox': path.resolve(__dirname, 'stubs/nodebox-stub.ts'),
+        // node-only dynamic imports (see stubs/empty-module.ts) — the polyfill
+        // plugin's `fs` alias mangles the /promises subpath under pnpm layout.
+        'node:fs/promises': path.resolve(__dirname, 'stubs/empty-module.ts'),
+        'fs/promises': path.resolve(__dirname, 'stubs/empty-module.ts'),
       },
     },
   };

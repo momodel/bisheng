@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 import MessagePanne from "@/components/bs-comp/chatComponent/MessagePanne";
 import { useMessageStore } from "@/components/bs-comp/chatComponent/messageStore";
 import { Button } from "@/components/bs-ui/button";
@@ -76,7 +77,7 @@ export default function index() {
     const [status, setStatus] = React.useState(LabelStatus.Unlabeled)
     const [isSelf, setIsSelf] = useState(false)
     const loading = false;
-    const { loadAssistantState, destroy } = useAssistantStore()
+    const { destroy } = useAssistantStore()
     const { loadHistoryMsg, loadMoreHistoryMsg, changeChatId, clearMsgs } = useMessageStore()
     const { loadHistoryMsg: loadFlowHistoryMsg,
         loadMoreHistoryMsg: loadMoreFlowHistoryMsg,
@@ -159,7 +160,7 @@ export default function index() {
                 </RadioGroup>
                 <PageChange />
             </div>
-            <div className="h-[calc(100vh-132px)]">
+            <div className="h-[calc(100vh-132px-var(--license-banner-h,0px))]">
                 {type === AppNumType.FLOW
                     ? <ChatMessages mark={mark} logo='' useName='' guideWord='' loadMore={() => loadMoreFlowHistoryMsg(fid, true)} onMarkClick={handleMarkClick}></ChatMessages>
                     : <MessagePanne mark={mark} logo='' useName='' guideWord=''
