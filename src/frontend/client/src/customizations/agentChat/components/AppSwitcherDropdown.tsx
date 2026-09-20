@@ -1,0 +1,64 @@
+// Frontend fork of pages/appChat/components/AppSwitcherDropdown.tsx. Edit this copy for custom chat.
+import { ArrowLeftRight, Loader2, Search, Pin } from "lucide-react";
+import type { AppItem } from "~/@types/app";
+import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/Popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "~/components/ui/Tooltip2";
+import { cn } from "~/utils";
+import AppAvator from "~/components/Avator";
+import { useAppSwitcher } from "~/customizations/agentChat/hooks/useAppSwitcher";
+import { useLocalize, useScrollRevealRef } from "~/hooks";
+export function AppSwitcherDropdown() {
+    const localize = useLocalize();
+    const appListScrollRevealRef = useScrollRevealRef<HTMLDivElement>();
+    const { allApps, searchQuery, setSearchQuery, loading, open, setOpen, disabled, currentFlowId, switchApp, } = useAppSwitcher();
+    const trigger = (<button disabled={disabled} className="p-1 text-gray-400 transition-colors fine-pointer:hover:text-gray-500 disabled:opacity-30 disabled:cursor-not-allowed">
+      <ArrowLeftRight size={14}/>
+    </button>);
+    if (disabled) {
+        return (<TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+          <TooltipContent>{localize('com_app_switcher_no_apps_tooltip')}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>);
+    }
+    return (<Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-[240px] p-0 bg-white shadow-[0px_4px_16px_rgba(0,0,0,0.08)] border border-border-base rounded-lg flex flex-col overflow-hidden">
+        
+        <div className="px-[12px] pt-[12px] pb-[8px] shrink-0">
+          <div className="flex items-center gap-[6px] h-[28px] px-[8px] border border-border-base rounded-md focus-within:border-[#DDDDDD] focus-within:shadow-[0_0_0_2px_#F1F5F9] transition-[border-color,box-shadow]">
+            <Search size={14} className="text-[#a9aeb8] shrink-0"/>
+            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={localize('com_app_search_by_name')} className="flex-1 bg-transparent border-none outline-none text-[13px] text-text-1 placeholder:text-[#a9aeb8]" autoFocus/>
+          </div>
+        </div>
+
+        
+        <div ref={appListScrollRevealRef} className="flex-1 overflow-y-auto scrollbar-on-scroll px-[8px] pb-[8px] flex flex-col gap-[4px] max-h-[268px]">
+          {loading ? (<div className="flex items-center justify-center py-6">
+              <Loader2 size={16} className="animate-spin text-gray-400"/>
+            </div>) : allApps.length === 0 ? (<div className="text-center py-6 text-[13px] text-gray-400">
+              {localize('com_app_no_matching_apps')}
+            </div>) : (allApps.map((app: AppItem & {
+            is_pinned?: boolean;
+            top?: boolean;
+        }) => {
+            const isActive = app.id === currentFlowId;
+            const isPinned = app.is_pinned || app.top;
+            return (<button key={app.id} onClick={() => switchApp(app)} className={cn('w-full flex items-center justify-between h-[32px] px-[4px] py-[5px] rounded-md transition-colors group cursor-pointer text-left fine-pointer:hover:bg-fill-2', isActive && 'bg-fill-2')}>
+                  <div className="flex items-center gap-[8px] min-w-0 flex-1">
+                    <AppAvator className="size-[20px] min-w-[20px] rounded-sm" iconClassName="w-3.5 h-3.5" url={app.logo} id={app.id as any} flowType={String(app.flow_type)}/>
+                    <span className="text-[14px] text-text-1 leading-[22px] truncate">
+                      {app.name}
+                    </span>
+                  </div>
+
+                  {isPinned && (<div className="shrink-0 size-[22px] flex items-center justify-center ml-[4px]">
+                      <Pin size={14} className="text-blue-500 fill-blue-500"/>
+                    </div>)}
+                </button>);
+        }))}
+        </div>
+      </PopoverContent>
+    </Popover>);
+}

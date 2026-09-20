@@ -1,0 +1,132 @@
+/* eslint-disable no-restricted-imports -- Existing Recoil implementation retained for the user-requested frontend copy. */
+// Frontend fork of pages/appChat/components/InputForm.tsx. Edit this copy for custom chat.
+import { useRef, useState } from "react";
+import { useRecoilValue } from "recoil";
+import { Button } from "~/components";
+import MultiSelect from "~/components/ui/MultiSelect";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/Select";
+import { useToastContext } from "~/Providers";
+import { useLocalize } from "~/hooks";
+import { emitAreaTextEvent, EVENT_TYPE } from "~/customizations/agentChat/useAreaText";
+import { fileAcceptToInputAccept, normalizeFileAccept } from "~/customizations/agentChat/fileAcceptUtils";
+import { bishengConfState } from "~/customizations/agentChat/store/atoms";
+import { InputComponent } from "~/customizations/agentChat/components/InputComponent";
+import { InputFileComponent } from "~/customizations/agentChat/components/InputFileComponent";
+import { MessageWarper } from "~/customizations/agentChat/components/MessageBsChoose";
+const enum FormItemType {
+    Text = 'text',
+    File = 'file',
+    Select = 'select'
+}
+interface WorkflowNodeParam {
+    key: string;
+    label?: string;
+    type: string;
+    value: any;
+    placeholder?: string;
+    help?: string;
+    tab?: string;
+    required?: boolean;
+    multi?: boolean;
+    options?: any[];
+    test?: string;
+    hidden?: boolean;
+}
+const InputForm = ({ data, flow, logo }: {
+    data: WorkflowNodeParam & { node_id: string };
+    logo: React.ReactNode;
+    flow: any;
+}) => {
+    const localize = useLocalize();
+    const bishengConfig = useRecoilValue(bishengConfState);
+    const formDataRef = useRef(data.value.reduce((map, item) => {
+        map[item.key] = { key: item.key, type: item.type, label: item.value, fileName: '', value: '' };
+        return map;
+    }, {}));
+    const handleChange = (item, value) => {
+        if (item.type === FormItemType.File) {
+            formDataRef.current[item.key].value = Array.isArray(value) ? value : [value];
+        }
+        else {
+            formDataRef.current[item.key].value = value;
+        }
+    };
+    const updataFileName = (item, fileName) => {
+        formDataRef.current[item.key].fileName = fileName;
+    };
+    const { showToast } = useToastContext();
+    const submit = () => {
+        const valuesObject = {};
+        let stringObject = "";
+        const errors: string[] = [];
+        Object.keys(formDataRef.current).forEach((key: string) => {
+            const fieldData = formDataRef.current[key];
+            const required = data.value.find(item => item.key === key).required;
+            if (required && !fieldData.value) {
+                errors.push(localize('com_ui_required_field', { field: fieldData.label }));
+            }
+            valuesObject[key] = fieldData.value;
+            stringObject += `${fieldData.label}:${fieldData.type === FormItemType.File ? fieldData.fileName : fieldData.value}\n`;
+        });
+        if (errors.length) {
+            return showToast({ message: errors.join('\n'), status: 'warning' });
+        }
+        emitAreaTextEvent({
+            action: EVENT_TYPE.FORM_SUBMIT,
+            data: valuesObject,
+            nodeId: data.node_id,
+            message: stringObject
+        });
+    };
+    const [multiVal, setMultiVal] = useState<Record<string, string[]>>({});
+    return <MessageWarper flow={flow} logo={logo}>
+        <div className="max-h-[520px] overflow-y-auto space-y-2">
+            {data.value.map((item, i) => (<div key={item.id} className="w-full text-sm bisheng-label">
+                        {item.value}
+                        {item.required && <span className="text-red-500">*</span>}
+                        
+                        <div className="mb-2">
+                            {(() => {
+                switch (item.type) {
+                    case FormItemType.Text:
+                        return (<InputComponent type="textarea" password={false} maxLength={10000} onChange={(val) => handleChange(item, val)}/>);
+                    case FormItemType.Select:
+                        return (item.multiple ?
+                            <MultiSelect multiple className={''} value={multiVal[item.key] || []} options={item.options.map(el => ({
+                                    label: el.text,
+                                    value: el.text
+                                }))} placeholder={localize('com_ui_please_select')} onChange={(v) => {
+                                    setMultiVal(prev => ({ ...prev, [item.key]: v }));
+                                    handleChange(item, v.join(','));
+                                }}>
+                                                    
+                                                </MultiSelect>
+                            : <Select onValueChange={(val) => handleChange(item, val)}>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder=""/>
+                                                    </SelectTrigger>
+                                                    <SelectContent className="bg-white">
+                                                        <SelectGroup>
+                                                            {item.options.map(el => (<SelectItem key={el.text} value={el.text}>
+                                                                    {el.text}
+                                                                </SelectItem>))}
+                                                        </SelectGroup>
+                                                    </SelectContent>
+                                                </Select>);
+                    case FormItemType.File:
+                        return (<InputFileComponent isSSO disabled={false} placeholder={localize('com_file_current_empty')} value={''} multiple={item.multiple} onChange={(name) => updataFileName(item, name)} suffixes={fileAcceptToInputAccept(normalizeFileAccept(item.file_type, {
+                                mediaEnabled: !!bishengConfig?.enable_media_upload,
+                            }))} onFileChange={(val) => handleChange(item, val)}/>);
+                    default:
+                        return null;
+                }
+            })()}
+                        </div>
+                    </div>))}
+            <div className="flex justify-end">
+                <Button size="sm" className="h-8 px-4" onClick={submit}>{localize('com_ui_start')}</Button>
+            </div>
+        </div>
+    </MessageWarper>;
+};
+export { InputForm };
