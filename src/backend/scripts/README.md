@@ -300,6 +300,69 @@ staged SQL rows, advances the resource version, and ends at
 `operation=FINALIZED` plus `resource projection_state=CURRENT`. Re-running a
 finalized operation only verifies and skips it.
 
+### `upgrade_v24_to_current.py`
+
+Recovery-only, one-command upgrade for a deployment restored from a v2.4
+MySQL backup when the current OpenFGA database is empty. It runs the complete
+current Alembic chain, reconstructs the legacy permission source, executes or
+resumes the formal F048 migration, runs D4 verification, and backfills menu
+permissions introduced after v2.4. It never starts API, Celery, or Linsight.
+
+Use this path only after all application processes are stopped and all of the
+following are true:
+
+- MySQL contains the restored pre-upgrade v2.4 `bisheng` database.
+- The configured OpenFGA database was deleted and recreated empty.
+- Redis is empty, or at minimum has no `migration:f006:*` keys and no live
+  permission-runtime heartbeats.
+- MySQL, Redis, and OpenFGA themselves remain running and reachable.
+
+Run from `src/backend/` (the container path is normally `/app`) with exactly
+the same `config` value used by the deployment. The default command only
+prints the plan; `--apply` performs the upgrade:
+
+```bash
+cd /app
+export config=config.yaml
+export PYTHONPATH=./
+.venv/bin/python scripts/upgrade_v24_to_current.py
+.venv/bin/python scripts/upgrade_v24_to_current.py --apply
+```
+
+For Compose, keep the middleware services running but stop every API, Worker,
+and Linsight process. Then use a one-off backend container instead of starting
+the API first:
+
+```bash
+docker compose run --rm --no-deps --entrypoint /bin/bash backend -lc \
+  'cd /app && export PYTHONPATH=./ && .venv/bin/python scripts/upgrade_v24_to_current.py --apply'
+```
+
+The command is crash-safe at the F048 boundary: before a formal run exists it
+idempotently rebuilds the legacy source; after a run exists it resumes that
+exact `run_id`; at `VERIFYING` it only verifies; at `READY_TO_START` it reports
+success without starting a second migration. Any ambiguous state fails closed.
+Only a final JSON result containing `final_phase=READY_TO_START` and
+`final_status=COMPLETED` permits normal startup:
+
+```bash
+docker compose up -d backend backend_worker
+# Also start the deployment's separate Linsight service, if it has one.
+```
+
+### `bootstrap_v24_permission_source.py`
+
+Internal recovery bridge used by `upgrade_v24_to_current.py`. It rebuilds the
+legacy v2.0.2 OpenFGA tuples from authoritative v2.4 SQL rows and verifies an
+exact higher-consistency Store match. It does not run F048 or start services.
+Normally use the one-command upgrade above; for diagnosis, this entry point is
+also dry-run by default and requires `--apply` for OpenFGA writes:
+
+```bash
+config=config.yaml PYTHONPATH=./ .venv/bin/python scripts/bootstrap_v24_permission_source.py
+config=config.yaml PYTHONPATH=./ .venv/bin/python scripts/bootstrap_v24_permission_source.py --apply
+```
+
 ### `migrate_f048_permission_data.py`
 
 Formal, forward-only migration from the legacy relation-model Config and
