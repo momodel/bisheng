@@ -13,6 +13,8 @@ import { cn, copyText, formatStrTime } from "~/utils";
 import { AppChatFileList } from "~/customizations/agentChat/components/AppChatFileList";
 import { MessageButtons } from "~/customizations/agentChat/components/MessageButtons";
 import useLocalize from "~/hooks/useLocalize";
+import { QuestionMessageContent } from '~/customizations/questionHelper/QuestionMessageContent';
+import { CUSTOM_APP_IDS } from '~/customizations/config';
 export const ReasoningLog = ({ loading, msg = '' }) => {
     const t = useLocalize();
     const [open, setOpen] = useState(true);
@@ -83,7 +85,7 @@ export function MessageBs({ logo, title, data, readOnly, isGuestMode = false, on
     const handleCopyMessage = () => {
         messageRef.current && copyText(messageRef.current);
     };
-    const { conversationId: chatIdFromUrl } = useParams();
+    const { conversationId: chatIdFromUrl, fid } = useParams();
     const chatId = chatIdFromUrl || "";
     const messageId = String(data.id ?? "");
     const { isActiveForChat } = useMessageSelection();
@@ -105,7 +107,10 @@ export function MessageBs({ logo, title, data, readOnly, isGuestMode = false, on
                             {message || (data.files?.length ?? 0) ?
                 <div ref={messageRef} className="">
                                     {message && <div className="bs-mkdown text-base break-words [word-break:break-all]">
-                                        <Markdown content={message} isLatestMessage={false} webContent={undefined} citations={(data as any).citations} messageId={String(data.id)} onOpenCitationPanel={onOpenCitationPanel}/>
+                                        {fid === CUSTOM_APP_IDS.questionHelper
+                                            ? <QuestionMessageContent key={messageId} content={message} complete={data.end && !('interrupted' in data && data.interrupted)} readOnly={!!readOnly || isGuestMode}
+                                                isLatestMessage={false} webContent={undefined} citations={data.citations} messageId={messageId} onOpenCitationPanel={onOpenCitationPanel}/>
+                                            : <Markdown content={message} isLatestMessage={false} webContent={undefined} citations={data.citations} messageId={messageId} onOpenCitationPanel={onOpenCitationPanel}/>}
                                     </div>}
                                     {(data.files?.length ?? 0) > 0 && (<AppChatFileList files={data.files ?? []} className="mt-2"/>)}
                                     
