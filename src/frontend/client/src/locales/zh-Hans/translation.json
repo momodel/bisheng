@@ -2189,5 +2189,21 @@
   "com_citation.no_references": "暂无参考资料",
   "com_citation.close_references": "关闭参考资料",
   "com_citation.back_to_references": "返回参考资料列表",
-  "com_citation.download_document": "下载文档"
+  "com_citation.download_document": "下载文档",
+  "htmlCourseware": {
+    "title": "网页课件",
+    "previewTitle": "网页课件预览",
+    "download": "下载 HTML",
+    "openPage": "新页面打开",
+    "uploading": "正在上传课件…",
+    "waitForCompletion": "等待完整课件生成后预览；未完成或已中断的内容暂不可操作。",
+    "uploadFailed": "课件上传失败，请重试",
+    "downloadFailed": "课件下载失败，请重试",
+    "previewDownloadFailed": "下载失败，请从原对话重新点击“新页面打开”后下载",
+    "popupBlocked": "浏览器拦截了新页面，请允许弹出窗口后重试",
+    "copyLink": "复制链接",
+    "copied": "链接已复制",
+    "copyFailed": "链接复制失败，请重试",
+    "invalidUrl": "缺少有效的课件链接"
+  }
 }

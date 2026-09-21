@@ -2260,5 +2260,21 @@
   "com_citation.no_references": "No references",
   "com_citation.close_references": "Close references",
   "com_citation.back_to_references": "Back to reference list",
-  "com_citation.download_document": "Download document"
+  "com_citation.download_document": "Download document",
+  "htmlCourseware": {
+    "title": "Web courseware",
+    "previewTitle": "Web courseware preview",
+    "download": "Download HTML",
+    "openPage": "Open in new tab",
+    "uploading": "Uploading courseware…",
+    "waitForCompletion": "Waiting for complete courseware. Incomplete or interrupted content cannot be opened yet.",
+    "uploadFailed": "Courseware upload failed. Please retry.",
+    "downloadFailed": "Courseware download failed. Please retry.",
+    "previewDownloadFailed": "Download failed. Reopen the courseware from the original conversation and try again.",
+    "popupBlocked": "Your browser blocked the new tab. Allow popups and retry.",
+    "copyLink": "Copy link",
+    "copied": "Link copied",
+    "copyFailed": "Could not copy the link. Please retry.",
+    "invalidUrl": "A valid courseware link is required."
+  }
 }

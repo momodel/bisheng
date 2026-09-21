@@ -6,6 +6,9 @@ export const customAgentChatRoutes: RouteObject[] = [{
   path: 'custom-app',
   lazy: async () => ({ Component: (await import('./CustomChatBoundary')).CustomChatBoundary }),
   children: [{
+    path: 'html-preview',
+    lazy: async () => ({ Component: (await import('../htmlCourseware/HtmlCoursewarePreview')).HtmlCoursewarePreview }),
+  }, {
     lazy: async () => ({ Component: (await import('./layout/MainLayout')).MainLayout }),
     children: [{
       lazy: async () => ({ Component: (await import('./layout/AppRoot')).AppRoot }),

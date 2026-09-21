@@ -2183,5 +2183,21 @@
   "com_citation.no_references": "参考資料はありません",
   "com_citation.close_references": "参考資料を閉じる",
   "com_citation.back_to_references": "参考資料一覧に戻る",
-  "com_citation.download_document": "ドキュメントをダウンロード"
+  "com_citation.download_document": "ドキュメントをダウンロード",
+  "htmlCourseware": {
+    "title": "Web教材",
+    "previewTitle": "Web教材のプレビュー",
+    "download": "HTMLをダウンロード",
+    "openPage": "新しいタブで開く",
+    "uploading": "教材をアップロード中…",
+    "waitForCompletion": "教材の生成完了を待っています。未完成または中断された内容は操作できません。",
+    "uploadFailed": "教材のアップロードに失敗しました。再試行してください。",
+    "downloadFailed": "教材のダウンロードに失敗しました。再試行してください。",
+    "previewDownloadFailed": "ダウンロードに失敗しました。元の会話から教材を新しいタブで開き直して再試行してください。",
+    "popupBlocked": "新しいタブがブロックされました。ポップアップを許可して再試行してください。",
+    "copyLink": "リンクをコピー",
+    "copied": "リンクをコピーしました",
+    "copyFailed": "リンクをコピーできませんでした。再試行してください。",
+    "invalidUrl": "有効な教材リンクが必要です。"
+  }
 }

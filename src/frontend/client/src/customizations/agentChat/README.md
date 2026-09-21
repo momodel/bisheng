@@ -17,6 +17,8 @@
 
 定制应用 ID 统一维护在 [`../config.ts`](../config.ts) 的 `CUSTOM_APP_IDS` 中。出题助手重建后只需更新 `questionHelper`；后续接入其他定制应用时，在该对象中新增对应字段，并由定制入口引用。这里填写 BiSheng 应用 ID（路由中的 `fid`），不是会话 ID 或原项目的 Dify 应用 ID。
 
+网页课件助手使用 `CUSTOM_APP_IDS.htmlCourseware`，组件位于 `../htmlCourseware/`。定制聊天识别完整的 `html` 围栏，在隔离 iframe 中预览并支持直接下载；“新页面打开”调用原 `/pyapi/cloud_disk/upload_html` 上传至云盘，再进入 `/custom-app/html-preview` 复制链接或下载。生成中的内容不执行预览。原 `/app` 地址继续使用原版聊天，要使用这些功能请进入同一应用的 `/custom-app` 地址。功能与验证范围见 [网页课件说明](../htmlCourseware/spec.md) 和 [验收清单](../htmlCourseware/e2e-checklist.md)。
+
 出题助手的试题卡片位于 `../questionHelper/`，由本目录的 `components/MessageBs.tsx` 按配置中的应用 ID 接入。识别 `markdown-exam` 围栏，复用原 Markdown 预览；消息结束且试题块闭合后提供 Excel 下载与加入题库。接口封装在 `src/api/questionHelper.ts`，使用域名根路径 `/pyapi` 和每次读取的 `localStorage.token`。入库保留原系统 teacher/admin 权限、题库多选／搜索／分页／新建；当前卡片防止重复点击，不承诺刷新后去重。验收范围见 [出题助手说明](../questionHelper/spec.md) 与 [页面验收清单](../questionHelper/e2e-checklist.md)。
 
 | 文件／目录 | 内容 |
