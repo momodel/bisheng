@@ -23,6 +23,7 @@ import MenuApprovalPluginGate from '@/layouts/MenuApprovalPluginGate';
 import { appsSectionLinkTarget } from '@/layouts/appModuleNavPaths';
 import { canOpenWorkbench } from '@/utils/platformAccess';
 import { LoadingIcon } from '~/components/ui/icon/Loading';
+import { customAgentChatRoutes } from '~/customizations/agentChat/routes';
 
 // Route-level code splitting (ledger #27): only the primary landing path
 // (login + main layout + chat home) ships in the entry chunk; every other
@@ -279,6 +280,7 @@ export const router = createBrowserRouter([
         ],
       },
       // Standalone chat — auth (login required, inside AuthLayout)
+      ...customAgentChatRoutes,
       { path: 'chat/flow/auth/:flowId', element: suspended(<StandaloneChatPage mode="auth" flowType="workflow" />) },
       { path: 'chat/assistant/auth/:flowId', element: suspended(<StandaloneChatPage mode="auth" flowType="assistant" />) },
 

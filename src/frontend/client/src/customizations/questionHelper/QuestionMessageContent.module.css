@@ -1,0 +1,30 @@
+.examBody {
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Keep exam details compact without changing the shared chat typography. */
+.examBody blockquote {
+  margin: 0.75rem 0;
+  padding: 0 8px;
+  border-left: 2px solid rgb(var(--brand-500));
+  color: inherit;
+  font-style: normal;
+  font-weight: 400;
+  line-height: inherit;
+  quotes: none;
+}
+
+/* Separate quoted fields should read as one continuous details block. */
+.examBody blockquote + blockquote {
+  margin-top: -0.75rem;
+}
+
+.examBody blockquote p {
+  margin: 0;
+}
+
+.examBody blockquote p::before,
+.examBody blockquote p::after {
+  content: none;
+}
