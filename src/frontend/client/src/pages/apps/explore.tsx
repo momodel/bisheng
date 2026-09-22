@@ -11,7 +11,7 @@ import { useLocalize, useMediaQuery } from "~/hooks"
 import { useGetBsConfig } from "~/hooks/queries/data-provider"
 import { cn, copyText } from "~/utils"
 import { getAppShareUrl } from './appUtils'
-import { AgentCard } from './components/AgentCard'
+import { ExploreAgentCard } from '~/customizations/agentChat/ExploreAgentCard'
 import { AgentNavigation } from './components/AgentNavigation'
 import { AppSearchBar } from './components/AppSearchBar'
 
@@ -228,7 +228,7 @@ export default function ExplorePlaza() {
                     style={{ gridTemplateColumns: `repeat(${exploreCols}, minmax(0, 1fr))` }}
                 >
                     {agents.map((agent, idx) => (
-                        <AgentCard
+                        <ExploreAgentCard
                             key={`${agent.id}-${idx}`}
                             agent={agent}
                             onStartChat={handleCardClick}
