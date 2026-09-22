@@ -1,6 +1,7 @@
 /* eslint-disable no-restricted-imports -- Existing Recoil implementation retained for the user-requested frontend copy. */
 // Frontend fork of pages/appChat/SideNav.tsx. Edit this copy for custom chat.
 import i18n from "~/locales/i18n";
+import { lessonPlanSearch } from '~/customizations/lessonPlan/lessonPlanUtils';
 import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -158,7 +159,7 @@ export function SideNav() {
                             switchConversation(list[0]);
                         }
                         else if (flowId && flowType) {
-                            navigate(`/custom-app/${flowId}/${flowType}`, {
+                            navigate(`/custom-app/${flowId}/${flowType}${lessonPlanSearch(flowId, location.search)}`, {
                                 state: { ...(location.state as object | null), fromDelete: true },
                             });
                         }
