@@ -24,6 +24,16 @@ const getInitialChatError = (res: any) => {
     }
     return { code: AppLostMessage, data: null };
 };
+// Assistant detail API returns `desc` while flow API returns `description`.
+// Normalize at the source so downstream readers only use `description`.
+interface FlowDescriptionSource {
+    description?: string;
+    desc?: string;
+}
+const normalizeFlowDescription = <T extends FlowDescriptionSource>(data: T) => ({
+    ...data,
+    description: data.description || data.desc || '',
+});
 export const enum FLOW_TYPES {
     WORK_FLOW = 10,
     ASSISTANT = 5,
@@ -148,7 +158,7 @@ export function AppChat({ chatId = '', flowId = '', shareToken = '', flowType = 
                     };
                 }
                 messages = msgRes.reverse();
-                flowData = { ...flowRes.data, isNew: !messages.length };
+                flowData = { ...normalizeFlowDescription(flowRes.data), isNew: !messages.length };
                 break;
             case FLOW_TYPES.ASSISTANT:
                 const [assistantRes, historyRes] = await Promise.all([
@@ -165,7 +175,7 @@ export function AppChat({ chatId = '', flowId = '', shareToken = '', flowType = 
                     };
                 }
                 messages = historyRes.reverse();
-                flowData = { ...assistantRes.data, flow_type: FLOW_TYPES.ASSISTANT, isNew: !messages.length };
+                flowData = { ...normalizeFlowDescription(assistantRes.data), flow_type: FLOW_TYPES.ASSISTANT, isNew: !messages.length };
                 break;
             default:
         }

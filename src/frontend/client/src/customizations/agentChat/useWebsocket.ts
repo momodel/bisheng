@@ -158,7 +158,7 @@ export const useWebSocket = (helpers) => {
                         } : undefined
                     },
                     name: helpers.flow.name,
-                    description: helpers.flow.description
+                    description: helpers.flow.description || helpers.flow.desc
                 };
                 ws?.send(JSON.stringify(msg));
                 if (helpers.flow.flow_type === 1 && callBack) {

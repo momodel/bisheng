@@ -116,7 +116,7 @@ export function SideNav() {
                                     <AppSwitcherDropdown />
                                 </div>
                             </div>
-                            <TruncatedLineTooltip text={flowData?.description || i18n.t("com_app_no_description_placeholder")} className="text-[12px] text-[#a9aeb8] leading-[19.5px] truncate"/>
+                            <TruncatedLineTooltip text={flowData?.description || flowData?.desc || i18n.t("com_app_no_description_placeholder")} className="text-[12px] text-[#a9aeb8] leading-[19.5px] truncate"/>
                         </div>
                     </div>
 

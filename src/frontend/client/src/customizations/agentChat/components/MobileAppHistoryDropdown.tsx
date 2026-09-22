@@ -92,7 +92,7 @@ export function MobileAppHistoryDropdown({ open, onClose, topOffset = 'calc(env(
                                     <AppSwitcherDropdown />
                                 </div>
                             </div>
-                            <TruncatedLineTooltip text={flowData?.description || i18n.t("com_app_no_description_placeholder")} className="truncate text-[12px] leading-[19.5px] text-[#a9aeb8]"/>
+                            <TruncatedLineTooltip text={flowData?.description || flowData?.desc || i18n.t("com_app_no_description_placeholder")} className="truncate text-[12px] leading-[19.5px] text-[#a9aeb8]"/>
                         </div>
                     </div>
                     <div className="flex items-center justify-center gap-1">

@@ -3,6 +3,8 @@ export interface AppItem {
   id: string;
   name: string;
   description: string;
+  /** Assistant detail API uses `desc`; normalized to `description` at load time. */
+  desc?: string;
   logo: string;
   flow_type: number; // 1=skill, 5=assistant, 10=workflow
   tags?: TagItem[];

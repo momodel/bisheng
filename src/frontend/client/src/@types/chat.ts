@@ -7,6 +7,8 @@ export interface FlowData {
     viewport: Record<string, unknown>; // Or a more specific type if viewport structure is known
   };
   description: string;
+  /** Assistant detail API uses `desc`; normalized to `description` at load time. */
+  desc?: string;
   flow_type: number;
   guide_word: null | string; // Assuming it can be null or string
   id: string;
