@@ -38,6 +38,12 @@
 
 修改以上副本，不要修改 `src/pages/appChat/`、原 `routes/AppRoot.tsx` 或原 `layouts/MainLayout.tsx` 来实现定制效果。
 
+## 教案助手
+
+通过 `../config.ts` 的 `CUSTOM_APP_IDS.lessonPlan` 接入，编辑器入口在同文件的 `LESSON_PLAN_EDITOR_PATH` 维护。仅定制版 `/custom-app/:conversationId/:fid/10` 识别 `markdown-lesson` 围栏；提示词需继续输出此标记。
+
+完全沿用原项目的入口条件：URL 有 `unitId` 或 `cache_id` 时显示“新页面打开”，否则只预览内容。正常完成后点击按钮，使用当前 `localStorage.token` 缓存原始 Markdown，再打开原 `/adminManage/AiLessonEditor`；编辑、Word 下载、加入课程继续由原编辑器提供。课程入口应传递真实的 `courseId` 和 `unitId`，独立入口由调用方传入 `cache_id`。新建和切换会话保留当前教案上下文。详见 [教案助手说明](../lessonPlan/spec.md) 和 [验收清单](../lessonPlan/e2e-checklist.md)。
+
 ## 共享与隔离的边界
 
 - **共享后端**：使用原应用 ID、会话 ID 和原 API。发送消息、重命名、删除、上传等仍作用于同一份后端数据。页面副本不提供数据隔离。

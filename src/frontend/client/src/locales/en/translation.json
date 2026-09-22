@@ -2276,5 +2276,13 @@
     "copied": "Link copied",
     "copyFailed": "Could not copy the link. Please retry.",
     "invalidUrl": "A valid courseware link is required."
+  },
+  "lessonPlan": {
+    "title": "Lesson plan",
+    "openPage": "Open in new page",
+    "uploading": "Uploading lesson plan…",
+    "openFailed": "Could not open the lesson plan. Please try again.",
+    "popupBlocked": "Your browser blocked the new page. Allow pop-ups and try again.",
+    "waitForCompletion": "Wait for the complete lesson plan. Incomplete or interrupted content cannot be opened yet."
   }
 }

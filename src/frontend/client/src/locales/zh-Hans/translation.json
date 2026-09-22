@@ -2205,5 +2205,13 @@
     "copied": "链接已复制",
     "copyFailed": "链接复制失败，请重试",
     "invalidUrl": "缺少有效的课件链接"
+  },
+  "lessonPlan": {
+    "title": "相关教案内容",
+    "openPage": "新页面打开",
+    "uploading": "正在上传教案…",
+    "openFailed": "教案打开失败，请重试",
+    "popupBlocked": "浏览器拦截了新页面，请允许弹出窗口后重试",
+    "waitForCompletion": "等待完整教案生成后操作；未完成或已中断的内容暂不可操作。"
   }
 }

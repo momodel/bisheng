@@ -1,5 +1,6 @@
 /* eslint-disable no-restricted-imports -- Existing Recoil implementation retained for the user-requested frontend copy. */
 // Frontend fork of pages/appChat/ChatView.tsx. Edit this copy for custom chat.
+import { lessonPlanSearch } from '~/customizations/lessonPlan/lessonPlanUtils';
 import { useCallback, useMemo, useState } from "react";
 import { useUnactivate } from "react-activation";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -60,9 +61,9 @@ export function ChatView({ data, cid, v, readOnly, isGuestMode = false }) {
                 updatedAt: new Date().toISOString(),
                 createdAt: new Date().toISOString(),
             }, ...prev]);
-        const nextPath = `/custom-app/${chatId}/${flowId}/${flowType}`;
+        const nextPath = `/custom-app/${chatId}/${flowId}/${flowType}${lessonPlanSearch(flowId, location.search)}`;
         navigate(nextPath, { state: location.state });
-    }, [flowId, flowType, localize, location.state, navigate, setConversations, cid]);
+    }, [flowId, flowType, localize, location.state, location.search, navigate, setConversations, cid]);
     const messages = chatState?.messages || [];
     const hasMessages = messages.length > 0;
     useExitSelectionOnChatChange(cid);

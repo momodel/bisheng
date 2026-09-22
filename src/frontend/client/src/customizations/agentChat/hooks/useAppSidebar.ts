@@ -1,6 +1,7 @@
 /* eslint-disable no-restricted-imports -- Existing Recoil implementation retained for the user-requested frontend copy. */
 // Frontend fork of pages/appChat/hooks/useAppSidebar.ts. Edit this copy for custom chat.
 import i18n from "~/locales/i18n";
+import { lessonPlanSearch } from '~/customizations/lessonPlan/lessonPlanUtils';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useRecoilState, useRecoilValue, useSetRecoilState } from "recoil";
@@ -78,13 +79,13 @@ export function useAppSidebar() {
                 updatedAt: new Date().toISOString(),
                 createdAt: new Date().toISOString(),
             }, ...prev]);
-        const nextPath = `/custom-app/${chatId}/${flowId}/${flowType}`;
+        const nextPath = `/custom-app/${chatId}/${flowId}/${flowType}${lessonPlanSearch(flowId, location.search)}`;
         navigate(nextPath, { state: location.state });
-    }, [flowId, flowType, conversationId, location.state, navigate, setConversations, localize]);
+    }, [flowId, flowType, conversationId, location.state, location.search, navigate, setConversations, localize]);
     const switchConversation = useCallback((conv: AppConversation) => {
-        const nextPath = `/custom-app/${conv.id}/${conv.flowId}/${conv.flowType}`;
+        const nextPath = `/custom-app/${conv.id}/${conv.flowId}/${conv.flowType}${lessonPlanSearch(conv.flowId, location.search)}`;
         navigate(nextPath, { state: location.state });
-    }, [location.state, navigate]);
+    }, [location.state, location.search, navigate]);
     const toggleSidebar = useCallback(() => {
         setSidebarVisible((prev) => !prev);
     }, [setSidebarVisible]);

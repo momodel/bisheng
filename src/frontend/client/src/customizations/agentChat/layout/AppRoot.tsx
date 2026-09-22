@@ -1,5 +1,6 @@
 /* eslint-disable no-restricted-imports -- Existing Recoil implementation retained for the user-requested frontend copy. */
 // Frontend fork of routes/AppRoot.tsx. Edit this copy for custom chat.
+import { lessonPlanSearch } from '~/customizations/lessonPlan/lessonPlanUtils';
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useRecoilState, useRecoilValue } from "recoil";
@@ -79,7 +80,7 @@ export function AppRoot() {
             ...prev,
         ]);
         setSidebarVisible(false);
-        navigate(`/custom-app/${chatId}/${flowId}/${flowType}`, { state: location.state });
+        navigate(`/custom-app/${chatId}/${flowId}/${flowType}${lessonPlanSearch(flowId, location.search)}`, { state: location.state });
     };
     useEffect(() => {
         if (!isAppConversationRoute)

@@ -16,6 +16,7 @@ import useLocalize from "~/hooks/useLocalize";
 import { QuestionMessageContent } from '~/customizations/questionHelper/QuestionMessageContent';
 import { CUSTOM_APP_IDS } from '~/customizations/config';
 import { HtmlCoursewareMessage } from '~/customizations/htmlCourseware/HtmlCoursewareMessage';
+import { LessonPlanMessage } from '~/customizations/lessonPlan/LessonPlanMessage';
 export const ReasoningLog = ({ loading, msg = '' }) => {
     const t = useLocalize();
     const [open, setOpen] = useState(true);
@@ -87,13 +88,14 @@ export function MessageBs({ logo, title, data, readOnly, isGuestMode = false, on
         messageRef.current && copyText(messageRef.current);
     };
     const { conversationId: chatIdFromUrl, fid } = useParams();
+    const fullWidthContent = fid === CUSTOM_APP_IDS.htmlCourseware || fid === CUSTOM_APP_IDS.lessonPlan;
     const chatId = chatIdFromUrl || "";
     const messageId = String(data.id ?? "");
     const { isActiveForChat } = useMessageSelection();
     const showCheckbox = !!chatId && isActiveForChat(chatId);
     return <div className="bisheng-message flex w-full py-2 items-start gap-2">
         {showCheckbox && messageId && (<MessageCheckbox chatId={chatId} messageId={messageId} className="mt-2 ml-2 shrink-0"/>)}
-        <div className={cn("w-fit group max-w-[90%]", fid === CUSTOM_APP_IDS.htmlCourseware && "w-full")}>
+        <div className={cn("w-fit group max-w-[90%]", fullWidthContent && "w-full")}>
             <ReasoningLog loading={!data.end && (data.reasoning_log || reasoningLog)} msg={data.reasoning_log || reasoningLog}/>
             {!(data.reasoning_log && !message && !(data.files?.length ?? 0)) && <>
                 <div className="flex gap-2 items-center">
@@ -103,7 +105,7 @@ export function MessageBs({ logo, title, data, readOnly, isGuestMode = false, on
                 <div className="min-h-8 px-4 rounded-2xl">
                     <div className="flex gap-3">
                         {logo}
-                        <div className={fid === CUSTOM_APP_IDS.htmlCourseware ? 'min-w-0 flex-1' : ''}>
+                        <div className={fullWidthContent ? 'min-w-0 flex-1' : ''}>
                             <p className="select-none font-semibold text-base mb-1">{title}</p>
                             {message || (data.files?.length ?? 0) ?
                 <div ref={messageRef} className="">
@@ -114,7 +116,10 @@ export function MessageBs({ logo, title, data, readOnly, isGuestMode = false, on
                                             : fid === CUSTOM_APP_IDS.htmlCourseware
                                                 ? <HtmlCoursewareMessage key={messageId} content={message} complete={data.end && !('interrupted' in data && data.interrupted)} readOnly={!!readOnly || isGuestMode}
                                                     isLatestMessage={false} webContent={undefined} citations={data.citations} messageId={messageId} onOpenCitationPanel={onOpenCitationPanel}/>
-                                                : <Markdown content={message} isLatestMessage={false} webContent={undefined} citations={data.citations} messageId={messageId} onOpenCitationPanel={onOpenCitationPanel}/>}
+                                                : fid === CUSTOM_APP_IDS.lessonPlan
+                                                    ? <LessonPlanMessage key={messageId} content={message} complete={data.end && !('interrupted' in data && data.interrupted)} readOnly={!!readOnly || isGuestMode}
+                                                        isLatestMessage={false} webContent={undefined} citations={data.citations} messageId={messageId} onOpenCitationPanel={onOpenCitationPanel}/>
+                                                    : <Markdown content={message} isLatestMessage={false} webContent={undefined} citations={data.citations} messageId={messageId} onOpenCitationPanel={onOpenCitationPanel}/>}
                                     </div>}
                                     {(data.files?.length ?? 0) > 0 && (<AppChatFileList files={data.files ?? []} className="mt-2"/>)}
                                     

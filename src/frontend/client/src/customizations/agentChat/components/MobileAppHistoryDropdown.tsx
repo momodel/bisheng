@@ -1,6 +1,7 @@
 /* eslint-disable no-restricted-imports -- Existing Recoil implementation retained for the user-requested frontend copy. */
 // Frontend fork of components/Nav/MobileAppHistoryDropdown.tsx. Edit this copy for custom chat.
 import i18n from "~/locales/i18n";
+import { lessonPlanSearch } from '~/customizations/lessonPlan/lessonPlanUtils';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -134,7 +135,7 @@ export function MobileAppHistoryDropdown({ open, onClose, topOffset = 'calc(env(
                             switchConversation(list[0]);
                         }
                         else if (flowId && flowType) {
-                            navigate(`/custom-app/${flowId}/${flowType}`, {
+                            navigate(`/custom-app/${flowId}/${flowType}${lessonPlanSearch(flowId, location.search)}`, {
                                 state: {
                                     ...(location.state as object | null),
                                     fromDelete: true,
