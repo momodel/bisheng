@@ -100,13 +100,10 @@
       "count": 3
     },
     "@typescript-eslint/no-unused-vars": {
-      "count": 6
+      "count": 5
     },
     "no-console": {
       "count": 1
-    },
-    "no-useless-escape": {
-      "count": 2
     },
     "react-hooks/exhaustive-deps": {
       "count": 4
@@ -1335,7 +1332,7 @@
       "count": 1
     },
     "@typescript-eslint/no-unused-vars": {
-      "count": 2
+      "count": 1
     },
     "no-restricted-syntax": {
       "count": 3
@@ -2717,9 +2714,6 @@
     "no-restricted-syntax": {
       "count": 2
     },
-    "no-useless-escape": {
-      "count": 1
-    },
     "react-hooks/rules-of-hooks": {
       "count": 1
     }
@@ -2880,9 +2874,6 @@
     "no-restricted-syntax": {
       "count": 3
     },
-    "no-useless-escape": {
-      "count": 1
-    },
     "react-hooks/exhaustive-deps": {
       "count": 2
     }
@@ -2910,9 +2901,6 @@
     },
     "no-restricted-syntax": {
       "count": 3
-    },
-    "no-useless-escape": {
-      "count": 1
     },
     "react-hooks/exhaustive-deps": {
       "count": 3
@@ -2954,7 +2942,7 @@
   },
   "src/pages/KnowledgePage/components/RichPreviewFile.tsx": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 2
+      "count": 1
     },
     "no-restricted-syntax": {
       "count": 2
@@ -2979,14 +2967,6 @@
       "count": 1
     },
     "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/pages/KnowledgePage/components/TxtFileViewer.tsx": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    },
-    "no-useless-escape": {
       "count": 1
     }
   },
