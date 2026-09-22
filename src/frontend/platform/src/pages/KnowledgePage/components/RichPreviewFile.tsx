@@ -1,11 +1,10 @@
 import { LoadingIcon } from "@/components/bs-icons/loading";
+import { withFileServiceBaseUrl } from "@/utils/fileServiceUrl";
 import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MarkdownView } from "./PreviewParagraph";
 import TxtFileViewer from "./TxtFileViewer";
-
-declare const __APP_ENV__: any;
 
 type PreviewData = {
   original_url?: string;
@@ -45,11 +44,6 @@ export function buildMediaUploadPreviewData(
     file_source: isVideo ? "video_transcript" : "audio_transcript",
     media_kind: isVideo ? "video" : "audio",
   };
-}
-
-function normalizeUrl(url?: string) {
-  if (!url) return "";
-  return url.replace(/https?:\/\/[^/]+/, __APP_ENV__.BASE_URL);
 }
 
 function getExtensionFromUrl(url?: string) {
@@ -117,7 +111,7 @@ function TextFromUrl({ fileUrl, section }: { fileUrl: string; section?: string }
     let cancelled = false;
     setLoading(true);
     setError("");
-    fetch(normalizeUrl(fileUrl))
+    fetch(withFileServiceBaseUrl(fileUrl))
       .then((response) => {
         if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
         return response.text();
@@ -200,7 +194,7 @@ export default function RichPreviewFile({ file, previewData }: { file: any; prev
   const textUrl = isMedia ? mediaTextUrl : previewData?.preview_url || previewData?.original_url || "";
   const htmlUrl = previewData?.html_preview_url || "";
   const originalUrl = previewData?.original_url || "";
-  const mediaUrl = normalizeUrl(originalUrl);
+  const mediaUrl = withFileServiceBaseUrl(originalUrl);
   const title = previewData?.web_title || file?.file_name || file?.fileName || file?.name || "";
 
   if (isMedia) {

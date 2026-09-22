@@ -2,6 +2,7 @@
 import FileView from "@/components/bs-comp/FileView";
 import { LoadingIcon } from "@/components/bs-icons/loading";
 import { cn } from "@/utils";
+import { withFileServiceBaseUrl } from "@/utils/fileServiceUrl";
 import { Info } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -280,7 +281,7 @@ export default function PreviewFile({
       case 'bmp': return (
         <img
           className="border"
-          src={url.replace(/https?:\/\/[^\/]+/, __APP_ENV__.BASE_URL)}
+          src={withFileServiceBaseUrl(url)}
           alt="预览图片"
         />
       );

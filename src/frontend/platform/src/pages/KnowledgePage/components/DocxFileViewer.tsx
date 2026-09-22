@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as mammoth from "mammoth";
 import { LoadingIcon } from "@/components/bs-icons/loading";
+import { withFileServiceBaseUrl } from "@/utils/fileServiceUrl";
 
 declare const __APP_ENV__: any;
 
@@ -35,7 +36,7 @@ const DocxPreview = ({ filePath }) => {
             try {
                 setLoading(true);
                 // 1. 下载 DOCX 文件
-                const response = await fetch(filePath.replace(/https?:\/\/[^\/]+/, __APP_ENV__.BASE_URL));
+                const response = await fetch(withFileServiceBaseUrl(filePath));
                 if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
 
                 // 2. 获取文件 ArrayBuffer

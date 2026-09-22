@@ -5,6 +5,7 @@ import { Button } from "@/components/bs-ui/button";
 import { useToast } from "@/components/bs-ui/toast/use-toast";
 import { getFileBboxApi, getFilePathApi, getKnowledgeChunkApi, updateChunkApi, updatePreviewChunkApi } from "@/controllers/API";
 import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
+import { withFileServiceBaseUrl } from "@/utils/fileServiceUrl";
 import { Crosshair, Info, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from "react-i18next";
@@ -248,7 +249,7 @@ const ParagraphEdit = ({
             case 'jpeg':
             case 'bmp': return <img
                 className="border"
-                src={previewFileUrl.replace(/https?:\/\/[^\/]+/, __APP_ENV__.BASE_URL)} alt="" />
+                src={withFileServiceBaseUrl(previewFileUrl)} alt="" />
             default:
                 return <div className="flex justify-center items-center h-full text-gray-400">
                     <div className="text-center">

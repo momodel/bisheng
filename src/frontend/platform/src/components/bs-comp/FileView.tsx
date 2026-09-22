@@ -4,6 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FixedSizeList as List, areEqual } from 'react-window';
+import { withFileServiceBaseUrl } from '@/utils/fileServiceUrl';
 import { LoadingIcon } from '../bs-icons/loading';
 
 declare const __APP_ENV__: any;
@@ -298,7 +299,7 @@ export default function FileView({
         setLoading(true)
         setLoadError(false)
         // sass环境使用sass地址
-        const pdfUrl = fileUrl.replace(/https?:\/\/[^\/]+/, __APP_ENV__.BASE_URL);  // '/doc.pdf';
+        const pdfUrl = withFileServiceBaseUrl(fileUrl);
 
 
         pdfjsLib.GlobalWorkerOptions.workerSrc = __APP_ENV__.BASE_URL + '/pdf.worker.min.js';
@@ -420,10 +421,8 @@ export default function FileView({
 };
 
 
-const SASS_HOST = 'https://bisheng.dataelem.com'
 export const checkSassUrl = (url: string) => {
-    return url.replace(/https?:\/\/[^\/]+/, __APP_ENV__.BASE_URL)
-    // location.origin === SASS_HOST ? url.replace(/https?:\/\/[^\/]+/, '') : url;
+    return withFileServiceBaseUrl(url)
 }
 
 

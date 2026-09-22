@@ -3,6 +3,7 @@ import FileView from "@/components/bs-comp/FileView";
 import { generateUUID } from "@/components/bs-ui/utils";
 import DocxPreview from "@/pages/KnowledgePage/components/DocxFileViewer";
 import TxtFileViewer from "@/pages/KnowledgePage/components/TxtFileViewer";
+import { withFileServiceBaseUrl } from "@/utils/fileServiceUrl";
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -71,7 +72,7 @@ export default function FileViewPanne({ file }) {
             case 'jpeg':
             case 'bmp': return <img
                 className="border"
-                src={previewFileUrl.replace(/https?:\/\/[^/]+/, __APP_ENV__.BASE_URL)} alt="" />
+                src={withFileServiceBaseUrl(previewFileUrl)} alt="" />
             default:
                 return <div className="flex justify-center items-center h-full text-gray-400">{t('fileNotSupported', { ns: 'knowledge' })}</div>
         }

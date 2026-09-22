@@ -1,8 +1,7 @@
 // @ts-strict-ignore
 import { useState, useEffect } from 'react';
+import { withFileServiceBaseUrl } from '@/utils/fileServiceUrl';
 import { MarkdownView } from './PreviewParagraph';
-
-declare const __APP_ENV__: any;
 
 const TxtFileViewer = ({ html = false, markdown = false, filePath }) => {
     const [content, setContent] = useState('');
@@ -13,7 +12,7 @@ const TxtFileViewer = ({ html = false, markdown = false, filePath }) => {
         const fetchTextFile = async () => {
             try {
                 setLoading(true);
-                const response = await fetch(filePath.replace(/https?:\/\/[^\/]+/, __APP_ENV__.BASE_URL));
+                const response = await fetch(withFileServiceBaseUrl(filePath));
 
                 if (!response.ok) {
                     throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
