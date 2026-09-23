@@ -13,6 +13,7 @@ import { MobileAppHistoryDropdown } from "~/customizations/agentChat/components/
 import NavToggle from "~/components/Nav/NavToggle";
 import { useAuthContext, useLocalize, useMediaQuery, usePrefersMobileLayout } from "~/hooks";
 import { SideNav } from "~/customizations/agentChat/SideNav";
+import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
 import { copyAppChatReturnTo, copyAppChatOrigin, normalizeAppChatReturn, resolveAppChatExitNavigateTarget, writeAppChatReturnTo, } from "~/customizations/agentChat/appChatOrigin";
 import { appConversationsState, sidebarVisibleState } from "~/customizations/agentChat/store/appSidebarAtoms";
 import store from "~/store";
@@ -138,7 +139,7 @@ export function AppRoot() {
                     {!isTabletOrMobile && !(isAppSurface && isAppChatCompact) && (<NavToggle navVisible={sidebarVisible} onToggle={toggleSidebar} isHovering={isHovering} setIsHovering={setIsHovering} className="absolute left-0 top-1/2 z-[50]" translateX={sidebarWidth - 5}/>)}
 
                     
-                    {!sidebarVisible && !(isAppSurface && isAppChatCompact) && (<div className="absolute left-3 top-3 z-[40] flex items-center gap-2 transition-all duration-300">
+                    {CUSTOM_CHAT_VISIBILITY.showGoBack && !sidebarVisible && !(isAppSurface && isAppChatCompact) && (<div className="absolute left-3 top-3 z-[40] flex items-center gap-2 transition-all duration-300">
                             <button type="button" onClick={handleGoBack} className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border-base bg-white text-text-1 shadow-sm transition-colors hover:bg-gray-50" aria-label={localize('com_ui_go_back')}>
                                 <ChevronLeft size={16} className="text-text-1"/>
                             </button>

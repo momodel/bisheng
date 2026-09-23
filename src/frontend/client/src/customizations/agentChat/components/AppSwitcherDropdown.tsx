@@ -7,10 +7,15 @@ import { cn } from "~/utils";
 import AppAvator from "~/components/Avator";
 import { useAppSwitcher } from "~/customizations/agentChat/hooks/useAppSwitcher";
 import { useLocalize, useScrollRevealRef } from "~/hooks";
+import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
 export function AppSwitcherDropdown() {
     const localize = useLocalize();
     const appListScrollRevealRef = useScrollRevealRef<HTMLDivElement>();
     const { allApps, searchQuery, setSearchQuery, loading, open, setOpen, disabled, currentFlowId, switchApp, } = useAppSwitcher();
+    // The switcher entry point stays hidden in the simplified custom chat.
+    if (!CUSTOM_CHAT_VISIBILITY.showAppSwitcherTrigger) {
+        return null;
+    }
     const trigger = (<button disabled={disabled} className="p-1 text-gray-400 transition-colors fine-pointer:hover:text-gray-500 disabled:opacity-30 disabled:cursor-not-allowed">
       <ArrowLeftRight size={14}/>
     </button>);

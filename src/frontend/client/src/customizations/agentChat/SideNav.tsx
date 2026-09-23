@@ -14,6 +14,7 @@ import { useGetBsConfig } from "~/hooks/queries/data-provider";
 import { UserPopMenu } from "~/layouts/UserPopMenu";
 import { AppSidebarConvoItem } from "~/customizations/agentChat/components/AppSidebarConvoItem";
 import { AppSwitcherDropdown } from "~/customizations/agentChat/components/AppSwitcherDropdown";
+import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
 import { useAppSidebar } from "~/customizations/agentChat/hooks/useAppSidebar";
 import { sidebarVisibleState } from "~/customizations/agentChat/store/appSidebarAtoms";
 import { currentChatState } from "~/customizations/agentChat/store/atoms";
@@ -91,7 +92,7 @@ export function SideNav() {
             </div>
 
             
-            <div className="hidden touch-desktop:flex shrink-0 items-center gap-2">
+            {CUSTOM_CHAT_VISIBILITY.showGoBack && (<div className="hidden touch-desktop:flex shrink-0 items-center gap-2">
                 <button type="button" onClick={handleGoBack} className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-text-1 transition-colors fine-pointer:hover:bg-fill-1" aria-label={localize('com_ui_go_back')}>
                     <ChevronLeft size={16} className="shrink-0"/>
                 </button>
@@ -99,7 +100,7 @@ export function SideNav() {
                 <span className="min-w-0 truncate text-[14px] font-medium leading-[22px] text-text-1">
                     {localize('com_app_chat_sidebar_title')}
                 </span>
-            </div>
+            </div>)}
 
             
             <div className="shrink-0 touch-mobile:px-2 touch-mobile:pt-4 touch-mobile:pb-6">
@@ -120,14 +121,16 @@ export function SideNav() {
                         </div>
                     </div>
 
-                    <div className="flex items-center justify-center gap-[4px]">
+                    {CUSTOM_CHAT_VISIBILITY.showShareEntry ? (<div className="flex items-center justify-center gap-[4px]">
                         {showShareApp ? (<button onClick={shareApp} type="button" className="flex h-[28px] min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-border-base bg-white text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50 touch-mobile:px-2">
                                 {localize('com_app_share_app')}
                             </button>) : null}
                         <button onClick={createNewChat} type="button" className={`min-w-0 h-[28px] flex items-center justify-center gap-1 bg-white border border-border-base rounded-md text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50 max-[576px]:px-2 ${showShareApp ? 'flex-1' : 'w-full'}`}>
                             {localize('com_knowledge_start_new_chat')}
                         </button>
-                    </div>
+                    </div>) : (<button onClick={createNewChat} type="button" className={`min-w-0 h-[28px] flex items-center justify-center gap-1 bg-white border border-border-base rounded-md text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50 max-[576px]:px-2 ${showShareApp ? 'flex-1' : 'w-full'}`}>
+                            {localize('com_knowledge_start_new_chat')}
+                    </button>)}
                 </div>
             </div>
 

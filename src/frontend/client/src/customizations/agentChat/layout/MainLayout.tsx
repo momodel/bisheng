@@ -26,6 +26,7 @@ import { getPlatformAdminPanelUrl } from "~/utils/platformAdminUrl";
 import { canOpenWorkbench, canShowPlatformAdminEntry } from "~/utils/platformAccess";
 import { UserPopMenu } from "~/layouts/UserPopMenu";
 import WorkbenchAccessGuard from "~/layouts/WorkbenchAccessGuard";
+import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
 import { appsSectionLinkTarget, lastSectionPaths } from "~/customizations/agentChat/layout/appModuleNavPaths";
 interface SidebarItemProps {
     icon: React.ReactNode;
@@ -325,6 +326,7 @@ export function MainLayout() {
     })();
     return (<div data-custom-agent-chat className={cn('relative flex w-screen bg-fill-1', isMobile ? 'min-h-[100dvh] overflow-x-clip' : 'h-[100dvh] overflow-hidden')}>
       <WorkbenchAccessGuard />
+      {CUSTOM_CHAT_VISIBILITY.showSidebar && (<>
       {shouldHideSidebarOnMobileAppsArea ? (systemMenuRevealing ? (<div className="absolute inset-y-0 left-0 z-30">
             <Sidebar mobileSidebarOpen={mobileSidebarOpen} onCloseMobileApps={() => setMobileSidebarOpen(false)}/>
           </div>) : null) : (<Sidebar mobileSidebarOpen={mobileSidebarOpen} onCloseMobileApps={() => setMobileSidebarOpen(false)}/>)}
@@ -335,6 +337,7 @@ export function MainLayout() {
           
           <button type="button" className="min-w-0 flex-1 bg-[rgba(86,88,105,0.55)]" aria-label={localize('com_nav_close_sidebar')} onClick={() => setMobileSidebarOpen(false)}/>
         </div>) : null}
+      </>)}
       <main className={cn('relative min-w-0 flex-1', isMobile ? 'min-h-[100dvh]' : 'h-[100dvh] py-2 pr-2', shouldHideSidebarOnMobileAppsArea && 'transition-transform duration-300 ease-out', systemMenuRevealing && 'translate-x-16')}>
         {systemMenuRevealing ? (<button type="button" aria-label={localize('com_nav_close_sidebar')} onClick={() => setSystemMenuOpen(false)} className="absolute inset-0 z-[60] cursor-default bg-transparent"/>) : null}
         {pathname.startsWith('/menu-unavailable') ? (<div className={cn('flex flex-col bg-white shadow-[0px_0px_20px_0px_#07225808]', !isMobile && 'rounded-xl', systemMenuRevealing && 'rounded-l-3xl', isMobile

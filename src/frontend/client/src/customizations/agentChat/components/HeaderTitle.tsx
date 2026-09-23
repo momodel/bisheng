@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import { useLocalize, useMediaQuery, usePrefersMobileLayout } from "~/hooks";
 import { cn } from "~/utils";
 import ShareChat from "~/components/Share/ShareChat";
+import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
 const types = {
     1: 'skill',
     5: 'assistant',
@@ -42,9 +43,8 @@ export function HeaderTitle({ conversation, readOnly, hideShare = false, onOpenW
 
       
       <div className="flex-1 flex justify-end items-center gap-1">
-        {!readOnly && !hideShare && (<ShareChat type={types[conversation?.flowType as keyof typeof types] ?? 'workbench_chat'} flowId={conversation?.flowId} chatId={conversation?.conversationId || ''}/>)}
-        
-        {hasWorkspaceFiles && onOpenWorkspace && (<button type="button" onClick={onOpenWorkspace} title={localize('com_linsight_workspace')} aria-label="workspace" className={cn('flex h-7 shrink-0 items-center justify-center overflow-hidden rounded-lg text-gray-600 transition-[width,opacity] duration-200 hover:bg-gray-100', workspaceOpen ? 'pointer-events-none w-0 opacity-0' : 'w-7 opacity-100 delay-150')}>
+        {CUSTOM_CHAT_VISIBILITY.showShareEntry && !readOnly && !hideShare && (<ShareChat type={types[conversation?.flowType as keyof typeof types] ?? 'workbench_chat'} flowId={conversation?.flowId} chatId={conversation?.conversationId || ''}/>)}
+        {CUSTOM_CHAT_VISIBILITY.showWorkspaceButton && hasWorkspaceFiles && onOpenWorkspace && (<button type="button" onClick={onOpenWorkspace} title={localize('com_linsight_workspace')} aria-label="workspace" className={cn('flex h-7 shrink-0 items-center justify-center overflow-hidden rounded-lg text-gray-600 transition-[width,opacity] duration-200 hover:bg-gray-100', workspaceOpen ? 'pointer-events-none w-0 opacity-0' : 'w-7 opacity-100 delay-150')}>
             <Outlined.RightSidebar size={16} className="shrink-0"/>
           </button>)}
       </div>
