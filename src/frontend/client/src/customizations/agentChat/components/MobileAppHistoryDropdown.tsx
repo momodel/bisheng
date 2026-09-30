@@ -14,6 +14,7 @@ import { AppSwitcherDropdown } from "~/customizations/agentChat/components/AppSw
 import { currentChatState } from "~/customizations/agentChat/store/atoms";
 import { useRecoilValue } from "recoil";
 import { cn } from "~/utils";
+import { CUSTOM_CHAT_VISIBILITY } from "../customChatVisibility";
 interface MobileAppHistoryDropdownProps {
     open: boolean;
     onClose: () => void;
@@ -72,7 +73,7 @@ export function MobileAppHistoryDropdown({ open, onClose, topOffset = 'calc(env(
     const { groups, activeConversationId, switchConversation, createNewChat, shareApp, fetchConversations, currentApp, } = useAppSidebar();
     const chatState = useRecoilValue(currentChatState);
     const flowData = chatState?.flow ?? currentApp;
-    const showShareApp = flowData?.can_share === true;
+    const showShareApp = CUSTOM_CHAT_VISIBILITY.showShareEntry && flowData?.can_share === true;
     if (!open || typeof document === 'undefined')
         return null;
     return createPortal(<div className="fixed inset-x-0 bottom-0 z-[80] flex flex-col bg-white" style={{ top: topOffset }} role="dialog" aria-modal="true" aria-label={localize('com_app_chat_sidebar_title')}>

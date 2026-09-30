@@ -2189,7 +2189,7 @@
     "previewTitle": "Web教材のプレビュー",
     "download": "HTMLをダウンロード",
     "openPage": "新しいタブで開く",
-    "uploading": "教材をアップロード中…",
+    "uploading": "読み込み中…",
     "waitForCompletion": "教材の生成完了を待っています。未完成または中断された内容は操作できません。",
     "uploadFailed": "教材のアップロードに失敗しました。再試行してください。",
     "downloadFailed": "教材のダウンロードに失敗しました。再試行してください。",

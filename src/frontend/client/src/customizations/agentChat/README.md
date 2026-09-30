@@ -38,6 +38,10 @@
 
 修改以上副本，不要修改 `src/pages/appChat/`、原 `routes/AppRoot.tsx` 或原 `layouts/MainLayout.tsx` 来实现定制效果。
 
+### 手机与桌面布局断点
+
+`customChatVisibility.tsx` 中的 `CUSTOM_CHAT_LAYOUT.mobileMaxWidth` 默认为 `767`：宽度 ≥768px 时保留 240px 会话侧栏、56px 标题栏及桌面边距，包括 768–1023px 的小窗口；≤767px 时使用手机布局，隐藏固定侧栏，通过移动端标题下拉查看历史，并保留新建会话和聊天操作。所有定制导航使用 `useCustomChatMobileLayout()` 的统一判断，不依赖全局 `touch-mobile` 的 1023px 断点。手机端系统菜单、返回、分享同样遵守 `CUSTOM_CHAT_VISIBILITY`，关闭时不渲染对应入口。聊天内容区仍随可用宽度调整，不会把整个页面等比缩放；原版 `/app/...` 不受影响。
+
 ## 教案助手
 
 通过 `../config.ts` 的 `CUSTOM_APP_IDS.lessonPlan` 接入，编辑器入口在同文件的 `LESSON_PLAN_EDITOR_PATH` 维护。仅定制版 `/custom-app/:conversationId/:fid/10` 识别 `markdown-lesson` 围栏；提示词需继续输出此标记。

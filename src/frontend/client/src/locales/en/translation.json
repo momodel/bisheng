@@ -2266,7 +2266,7 @@
     "previewTitle": "Web courseware preview",
     "download": "Download HTML",
     "openPage": "Open in new tab",
-    "uploading": "Uploading courseware…",
+    "uploading": "Loading…",
     "waitForCompletion": "Waiting for complete courseware. Incomplete or interrupted content cannot be opened yet.",
     "uploadFailed": "Courseware upload failed. Please retry.",
     "downloadFailed": "Courseware download failed. Please retry.",

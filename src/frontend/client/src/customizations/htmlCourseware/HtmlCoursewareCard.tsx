@@ -10,6 +10,7 @@ import { useLocalize } from '~/hooks';
 import { useToastContext } from '~/Providers';
 import { coursewareFilename, coursewarePreviewLink, isHtmlComplete } from './coursewareUtils';
 import { saveCoursewareSource } from './coursewareSource';
+import { showCoursewareLoading } from './showCoursewareLoading';
 
 interface HtmlCoursewareCardProps {
   html: string;
@@ -49,8 +50,7 @@ export function HtmlCoursewareCard({ html, ready, readOnly, generating = false }
       return;
     }
     tab.opener = null;
-    tab.document.title = t('htmlCourseware.uploading');
-    tab.document.body.textContent = t('htmlCourseware.uploading');
+    showCoursewareLoading(tab, t('htmlCourseware.uploading'));
     uploadLock.current = true;
     setUploading(true);
     try {

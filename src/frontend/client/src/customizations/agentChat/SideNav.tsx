@@ -9,12 +9,13 @@ import { useSetRecoilState, useRecoilValue } from "recoil";
 import AppAvator from "~/components/Avator";
 import { MobileSidebarHeaderTabs } from "~/components/Nav/MobileSidebarHeaderTabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "~/components/ui/Tooltip2";
-import { useLocalize, usePrefersMobileLayout } from "~/hooks";
+import { useLocalize } from "~/hooks";
 import { useGetBsConfig } from "~/hooks/queries/data-provider";
 import { UserPopMenu } from "~/layouts/UserPopMenu";
 import { AppSidebarConvoItem } from "~/customizations/agentChat/components/AppSidebarConvoItem";
 import { AppSwitcherDropdown } from "~/customizations/agentChat/components/AppSwitcherDropdown";
 import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
+import { useCustomChatMobileLayout } from "./hooks/useCustomChatMobileLayout";
 import { useAppSidebar } from "~/customizations/agentChat/hooks/useAppSidebar";
 import { sidebarVisibleState } from "~/customizations/agentChat/store/appSidebarAtoms";
 import { currentChatState } from "~/customizations/agentChat/store/atoms";
@@ -74,25 +75,25 @@ export function SideNav() {
         navigate(target, { replace: target === '/apps' });
     };
     const localize = useLocalize();
-    const isTabletOrMobile = usePrefersMobileLayout();
+    const isMobile = useCustomChatMobileLayout();
     const setSidebarVisible = useSetRecoilState(sidebarVisibleState);
     const { data: bsConfig } = useGetBsConfig();
     const chatState = useRecoilValue(currentChatState);
     const { groups, activeConversationId, switchConversation, createNewChat, shareApp, fetchConversations, currentApp, } = useAppSidebar();
     const flowData = chatState?.flow ?? currentApp;
     const showShareApp = flowData?.can_share === true;
-    return (<div className={cn("relative h-full w-full overflow-hidden bg-white text-text-1 flex flex-col", isTabletOrMobile
+    return (<div className={cn("relative h-full w-full overflow-hidden bg-white text-text-1 flex flex-col", isMobile
             ? "border-r-0 px-0 pb-0 pt-0 gap-0"
             : "border-r border-border-base px-3 pb-2 pt-3 gap-4")}>
-            <div className="hidden touch-mobile:block">
+            {isMobile && CUSTOM_CHAT_VISIBILITY.showSidebar && (<div>
                 <MobileSidebarHeaderTabs logoSrc={bsConfig?.sidebarIcon?.image ? __APP_ENV__.BASE_URL + bsConfig.sidebarIcon.image : undefined} onClose={() => setSidebarVisible(false)} onLinkClick={(link) => {
             if (link.closeDrawerOnNavigate)
                 setSidebarVisible(false);
         }}/>
-            </div>
+            </div>)}
 
             
-            {CUSTOM_CHAT_VISIBILITY.showGoBack && (<div className="hidden touch-desktop:flex shrink-0 items-center gap-2">
+            {CUSTOM_CHAT_VISIBILITY.showGoBack && !isMobile && (<div className="flex shrink-0 items-center gap-2">
                 <button type="button" onClick={handleGoBack} className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-text-1 transition-colors fine-pointer:hover:bg-fill-1" aria-label={localize('com_ui_go_back')}>
                     <ChevronLeft size={16} className="shrink-0"/>
                 </button>
@@ -103,7 +104,7 @@ export function SideNav() {
             </div>)}
 
             
-            <div className="shrink-0 touch-mobile:px-2 touch-mobile:pt-4 touch-mobile:pb-6">
+            <div className={cn("shrink-0", isMobile && "px-2 pt-4 pb-6")}>
                 <div className="border-border-base border-[0.5px] rounded-md p-[8px] flex flex-col gap-[12px]" style={{ backgroundImage: "linear-gradient(128.789deg, rgb(var(--brand-500)/0.04) 0%, rgb(255, 255, 255) 50%, rgb(var(--brand-500)/0.04) 100%)" }}>
                     <div className="flex items-center gap-[8px]">
                         <AppAvator className="size-[32px] min-w-[32px] rounded-sm" url={flowData?.logo} id={flowData?.id as any} flowType={String(flowData?.flow_type || 5)} iconClassName='w-5 h-5'/>
@@ -122,20 +123,20 @@ export function SideNav() {
                     </div>
 
                     {CUSTOM_CHAT_VISIBILITY.showShareEntry ? (<div className="flex items-center justify-center gap-[4px]">
-                        {showShareApp ? (<button onClick={shareApp} type="button" className="flex h-[28px] min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-border-base bg-white text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50 touch-mobile:px-2">
+                        {showShareApp ? (<button onClick={shareApp} type="button" className={cn("flex h-[28px] min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-border-base bg-white text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50", isMobile && "px-2")}>
                                 {localize('com_app_share_app')}
                             </button>) : null}
-                        <button onClick={createNewChat} type="button" className={`min-w-0 h-[28px] flex items-center justify-center gap-1 bg-white border border-border-base rounded-md text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50 max-[576px]:px-2 ${showShareApp ? 'flex-1' : 'w-full'}`}>
+                        <button onClick={createNewChat} type="button" className={cn("min-w-0 h-[28px] flex items-center justify-center gap-1 bg-white border border-border-base rounded-md text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50", isMobile && "px-2", showShareApp ? 'flex-1' : 'w-full')}>
                             {localize('com_knowledge_start_new_chat')}
                         </button>
-                    </div>) : (<button onClick={createNewChat} type="button" className={`min-w-0 h-[28px] flex items-center justify-center gap-1 bg-white border border-border-base rounded-md text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50 max-[576px]:px-2 ${showShareApp ? 'flex-1' : 'w-full'}`}>
+                    </div>) : (<button onClick={createNewChat} type="button" className={cn("min-w-0 h-[28px] flex items-center justify-center gap-1 bg-white border border-border-base rounded-md text-[14px] leading-[22px] transition-colors fine-pointer:hover:bg-gray-50", isMobile && "px-2", showShareApp ? 'flex-1' : 'w-full')}>
                             {localize('com_knowledge_start_new_chat')}
                     </button>)}
                 </div>
             </div>
 
             
-            <div className={cn('flex-1 overflow-y-auto pb-[20px] flex flex-col min-h-0 px-2', 'touch-mobile:pt-3')}>
+            <div className={cn('flex-1 overflow-y-auto pb-[20px] flex flex-col min-h-0 px-2', isMobile && 'pt-3')}>
                 {groups.length === 0 ? (<div className="flex flex-1 items-center justify-center min-h-[120px] px-0 py-6">
                         <p className="text-center text-[14px] leading-[19.5px] text-text-3">
                             {localize('com_app_chat_sidebar_empty')}
@@ -151,7 +152,7 @@ export function SideNav() {
                 const isActive = conv.id === activeConversationId;
                 return (<AppSidebarConvoItem key={conv.id} conv={conv} isActive={isActive} onClick={() => {
                         switchConversation(conv);
-                        if (isTabletOrMobile) {
+                        if (isMobile) {
                             setSidebarVisible(false);
                         }
                     }} onRenameSuccess={() => fetchConversations()} onDeleteSuccess={async () => {
@@ -176,8 +177,8 @@ export function SideNav() {
             </div>
 
             
-            <div className="shrink-0 border-t border-border-base px-2 pb-2 pt-1 hidden max-[768px]:block">
+            {isMobile && CUSTOM_CHAT_VISIBILITY.showSidebar && (<div className="shrink-0 border-t border-border-base px-2 pb-2 pt-1">
                 <UserPopMenu variant="drawer"/>
-            </div>
+            </div>)}
         </div>);
 }

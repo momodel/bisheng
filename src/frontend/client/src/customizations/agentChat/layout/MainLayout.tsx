@@ -9,7 +9,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import KeepAlive from "react-activation";
 import { matchPath, NavLink, useLocation, useOutlet } from "react-router-dom";
 import { useRecoilState } from "recoil";
-import { usePrefersMobileLayout, useScrollRevealRef } from "~/hooks";
+import { useScrollRevealRef } from "~/hooks";
 import { bishengConfState } from "~/customizations/agentChat/store/atoms";
 import { useGetBsConfig } from "~/hooks/queries/data-provider";
 import { useAuthContext, useLocalize, useWorkbenchMenuNames } from "~/hooks";
@@ -27,6 +27,7 @@ import { canOpenWorkbench, canShowPlatformAdminEntry } from "~/utils/platformAcc
 import { UserPopMenu } from "~/layouts/UserPopMenu";
 import WorkbenchAccessGuard from "~/layouts/WorkbenchAccessGuard";
 import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
+import { useCustomChatMobileLayout } from "../hooks/useCustomChatMobileLayout";
 import { appsSectionLinkTarget, lastSectionPaths } from "~/customizations/agentChat/layout/appModuleNavPaths";
 interface SidebarItemProps {
     icon: React.ReactNode;
@@ -72,7 +73,7 @@ function Sidebar({ mobileSidebarOpen, onCloseMobileApps, overlay = false, }: {
     const localize = useLocalize();
     const menuNames = useWorkbenchMenuNames();
     const [langcode, setLangcode] = useRecoilState(store.lang);
-    const isMobile = usePrefersMobileLayout();
+    const isMobile = useCustomChatMobileLayout();
     const isChatSection = /^\/(c|linsight)(\/|$)/.test(pathname);
     const isAppSection = pathname.includes('/apps') || pathname.includes('/custom-app/');
     const showExpandedHubSidebar = isMobile && isAppSection && overlay;
@@ -219,7 +220,7 @@ export function MainLayout() {
     const { user, logout, isUserLoading } = useAuthContext();
     const localize = useLocalize();
     const menuNames = useWorkbenchMenuNames();
-    const isMobile = usePrefersMobileLayout();
+    const isMobile = useCustomChatMobileLayout();
     const outletScrollRevealRef = useScrollRevealRef<HTMLDivElement>();
     const isAppSection = pathname.includes('/apps') || pathname.includes('/custom-app/');
     const isAppsArea = pathname.includes('/apps');
@@ -244,7 +245,7 @@ export function MainLayout() {
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [systemMenuOpen, setSystemMenuOpen] = useRecoilState(store.mobileSystemMenuOpenState);
     const shouldHideSidebarOnMobileAppsArea = isMobile && (isAppChatRoute || isAppsArea || isChannelRoute || isKnowledgeRoute || isChatHomeRoute || isMenuUnavailableRoute);
-    const systemMenuRevealing = systemMenuOpen && isMobile && shouldHideSidebarOnMobileAppsArea;
+    const systemMenuRevealing = CUSTOM_CHAT_VISIBILITY.showSidebar && systemMenuOpen && isMobile && shouldHideSidebarOnMobileAppsArea;
     useEffect(() => {
         if (systemMenuOpen)
             setSystemMenuOpen(false);

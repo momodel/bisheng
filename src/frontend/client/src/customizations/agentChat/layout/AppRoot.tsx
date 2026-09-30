@@ -11,9 +11,10 @@ import { Banner } from "~/components/Banners";
 import { MobileNav } from "../components/MobileNav";
 import { MobileAppHistoryDropdown } from "~/customizations/agentChat/components/MobileAppHistoryDropdown";
 import NavToggle from "~/components/Nav/NavToggle";
-import { useAuthContext, useLocalize, useMediaQuery, usePrefersMobileLayout } from "~/hooks";
+import { useAuthContext, useLocalize } from "~/hooks";
 import { SideNav } from "~/customizations/agentChat/SideNav";
 import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
+import { useCustomChatMobileLayout } from "../hooks/useCustomChatMobileLayout";
 import { copyAppChatReturnTo, copyAppChatOrigin, normalizeAppChatReturn, resolveAppChatExitNavigateTarget, writeAppChatReturnTo, } from "~/customizations/agentChat/appChatOrigin";
 import { appConversationsState, sidebarVisibleState } from "~/customizations/agentChat/store/appSidebarAtoms";
 import store from "~/store";
@@ -33,8 +34,7 @@ export function AppRoot() {
     const [, setAppConversations] = useRecoilState(appConversationsState);
     const [sidebarVisible, setSidebarVisible] = useRecoilState(sidebarVisibleState);
     const mobileNavHidden = useRecoilValue(store.chatMobileNavHiddenState);
-    const isTabletOrMobile = usePrefersMobileLayout();
-    const isAppChatCompact = useMediaQuery('(max-width: 1023px)');
+    const isMobile = useCustomChatMobileLayout();
     const sidebarWidth = 240;
     const isAppConversationRoute = /^\/custom-app\/[^/]+\/[^/]+\/[^/]+(?:\/|$)/.test(location.pathname);
     const isAppSurface = location.pathname.includes('/custom-app/');
@@ -46,6 +46,9 @@ export function AppRoot() {
         appSurfaceReturn?: string;
     };
     const toggleSidebar = () => setSidebarVisible((prev) => !prev);
+    useEffect(() => {
+        if (!isMobile) setAppHistoryOpen(false);
+    }, [isMobile]);
     const handleGoBack = () => {
         const pathSegments = location.pathname.split('/').filter(Boolean);
         const appSegmentIndex = pathSegments.indexOf('custom-app');
@@ -125,21 +128,19 @@ export function AppRoot() {
     return (<div className="h-full w-full overflow-hidden">
             
             <Banner onHeightChange={setBannerHeight}/>
-            <div className={cn("flex w-full overflow-hidden bg-[#F9F9F9]", isAppConversationRoute
-            ? " touch-mobile:p-0 max-[768px]:p-0"
-            : " touch-mobile:p-0")} style={{ height: `calc(100% - ${bannerHeight}px)` }}>
-                <div className={cn("relative z-0 flex h-full w-full overflow-hidden rounded-xl touch-mobile:rounded-none", "bg-white p-0")}>
+            <div className="flex w-full overflow-hidden bg-[#F9F9F9]" style={{ height: `calc(100% - ${bannerHeight}px)` }}>
+                <div className={cn("relative z-0 flex h-full w-full overflow-hidden bg-white p-0", isMobile ? "rounded-none" : "rounded-xl")}>
 
                     
-                    {!isTabletOrMobile && (<div className={cn('transition-all duration-300 overflow-hidden flex-shrink-0', sidebarVisible ? 'w-[240px]' : 'w-0')}>
+                    {!isMobile && (<div className={cn('transition-all duration-300 overflow-hidden flex-shrink-0', sidebarVisible ? 'w-[240px]' : 'w-0')}>
                             <SideNav />
                         </div>)}
 
                     
-                    {!isTabletOrMobile && !(isAppSurface && isAppChatCompact) && (<NavToggle navVisible={sidebarVisible} onToggle={toggleSidebar} isHovering={isHovering} setIsHovering={setIsHovering} className="absolute left-0 top-1/2 z-[50]" translateX={sidebarWidth - 5}/>)}
+                    {!isMobile && (<NavToggle navVisible={sidebarVisible} onToggle={toggleSidebar} isHovering={isHovering} setIsHovering={setIsHovering} className="absolute left-0 top-1/2 z-[50]" translateX={sidebarWidth - 5}/>)}
 
                     
-                    {CUSTOM_CHAT_VISIBILITY.showGoBack && !sidebarVisible && !(isAppSurface && isAppChatCompact) && (<div className="absolute left-3 top-3 z-[40] flex items-center gap-2 transition-all duration-300">
+                    {CUSTOM_CHAT_VISIBILITY.showGoBack && !sidebarVisible && !isMobile && (<div className="absolute left-3 top-3 z-[40] flex items-center gap-2 transition-all duration-300">
                             <button type="button" onClick={handleGoBack} className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border-base bg-white text-text-1 shadow-sm transition-colors hover:bg-gray-50" aria-label={localize('com_ui_go_back')}>
                                 <ChevronLeft size={16} className="text-text-1"/>
                             </button>
@@ -147,10 +148,10 @@ export function AppRoot() {
 
                     
                     <div className="relative flex h-full max-w-full min-w-0 flex-1 flex-col overflow-hidden">
-                        {isAppSurface && isAppChatCompact && !mobileNavHidden && (<div className="shrink-0 overflow-hidden rounded-t-xl bg-white">
+                        {isAppSurface && isMobile && !mobileNavHidden && (<div className="shrink-0 overflow-hidden bg-white">
                                 <MobileNav variant="chat" navVisible={sidebarVisible} setNavVisible={setSidebarVisible} persistNavVisibleInLocalStorage={false} navigateToNewChatPath={false} onNewChat={handleCreateNewAppChat} appSurfaceBackAction={handleGoBack} appHistoryDropdownOpen={appHistoryOpen} onToggleAppHistoryDropdown={() => setAppHistoryOpen((o) => !o)}/>
                             </div>)}
-                        {isAppSurface && isAppChatCompact && (<MobileAppHistoryDropdown open={appHistoryOpen} onClose={() => setAppHistoryOpen(false)}/>)}
+                        {isAppSurface && isMobile && (<MobileAppHistoryDropdown open={appHistoryOpen} onClose={() => setAppHistoryOpen(false)}/>)}
                         <div className="min-h-0 min-w-0 flex-1 overflow-hidden bg-white">
                             <Outlet context={{ navVisible, setNavVisible } satisfies ContextType}/>
                         </div>

@@ -2195,7 +2195,7 @@
     "previewTitle": "网页课件预览",
     "download": "下载 HTML",
     "openPage": "新页面打开",
-    "uploading": "正在上传课件…",
+    "uploading": "加载中…",
     "waitForCompletion": "等待完整课件生成后预览；未完成或已中断的内容暂不可操作。",
     "uploadFailed": "课件上传失败，请重试",
     "downloadFailed": "课件下载失败，请重试",
