@@ -54,7 +54,8 @@ export function ChatMessages({ useName, readOnly, title, logo, disabledSearch = 
     console.log("messages :>> ", chatState, messages, guideWord);
     const remark = chatState?.flow?.guide_word;
     if (!chatState) return null;
-    return <div id="customChatMessageScrollPane" ref={messageScrollRef} className="h-full overflow-y-auto scrollbar-hide pt-2 pb-44 px-4">
+    return <div id="customChatMessageScrollPane" ref={messageScrollRef} className="h-full w-full overflow-y-auto scrollbar-hide">
+        <div className="mx-auto w-full max-w-[800px] pt-2 pb-44 px-4">
         <SelectionMessagesProvider messages={selectableMessages}>
         {selectionActive && messages.length > 0 && (<SelectAllBelowBanner scrollRef={messageScrollRef}/>)}
         {remark && <MessageRemark readOnly={readOnly} logo={logo} title={title} message={remark}/>}
@@ -110,6 +111,7 @@ export function ChatMessages({ useName, readOnly, title, logo, disabledSearch = 
             <InputFormSkill flow={chatState.flow} logo={logo}/>)}
 
         </SelectionMessagesProvider>
+        </div>
     </div>;
 }
 ;

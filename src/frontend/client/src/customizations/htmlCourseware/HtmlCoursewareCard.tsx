@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useHref } from 'react-router-dom';
+import { Outlined } from 'bisheng-icons';
 import { Button } from '@bisheng/ui';
 import { uploadHtmlCourseware, type UploadedCourseware } from '~/api/htmlCourseware';
 import { triggerBrowserDownload } from '~/api/messageExport';
 import { NotificationSeverity } from '~/common';
+import { buildSandboxedSrcDoc } from '~/utils/sandboxedHtml';
 import { useLocalize } from '~/hooks';
 import { useToastContext } from '~/Providers';
 import { coursewareFilename, coursewarePreviewLink, isHtmlComplete } from './coursewareUtils';
@@ -13,9 +15,10 @@ interface HtmlCoursewareCardProps {
   html: string;
   ready: boolean;
   readOnly: boolean;
+  generating?: boolean;
 }
 
-export function HtmlCoursewareCard({ html, ready, readOnly }: HtmlCoursewareCardProps) {
+export function HtmlCoursewareCard({ html, ready, readOnly, generating = false }: HtmlCoursewareCardProps) {
   const t = useLocalize();
   const { showToast } = useToastContext();
   const previewPath = useHref('/custom-app/html-preview');
@@ -23,6 +26,7 @@ export function HtmlCoursewareCard({ html, ready, readOnly }: HtmlCoursewareCard
   const uploadLock = useRef(false);
   const uploaded = useRef<{ html: string; file: UploadedCourseware } | null>(null);
   const complete = ready && isHtmlComplete(html);
+  const previewHtml = useMemo(() => complete ? buildSandboxedSrcDoc(html) : undefined, [complete, html]);
 
   const handleDownload = () => {
     if (!complete || readOnly) return;
@@ -78,8 +82,11 @@ export function HtmlCoursewareCard({ html, ready, readOnly }: HtmlCoursewareCard
       </div>}
     </div>
     {complete
-      ? <iframe srcDoc={html} title={t('htmlCourseware.previewTitle')} sandbox="allow-scripts allow-popups"
+      ? <iframe srcDoc={previewHtml} title={t('htmlCourseware.previewTitle')} sandbox="allow-scripts allow-popups"
           referrerPolicy="no-referrer" className="block h-[600px] w-full border-0 bg-white" />
-      : <p className="px-4 py-8 text-body-sm text-text-3" role="status">{t('htmlCourseware.waitForCompletion')}</p>}
+      : <div className="flex items-center gap-2 px-4 py-8" role="status">
+          {generating && <Outlined.Loading size={16} className="shrink-0 animate-spin text-text-3" aria-hidden />}
+          <p className="text-body-sm text-text-3">{t('htmlCourseware.waitForCompletion')}</p>
+        </div>}
   </section>;
 }

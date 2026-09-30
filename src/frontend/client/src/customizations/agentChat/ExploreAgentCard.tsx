@@ -1,20 +1,29 @@
 import type { ComponentProps } from 'react';
 import { Button } from '@bisheng/ui';
-import { useNavigate } from 'react-router-dom';
+import { useHref, useLocation } from 'react-router-dom';
+import { CUSTOM_APP_IDS } from '~/customizations/config';
+import { lessonPlanSearch, lessonPlanTarget } from '~/customizations/lessonPlan/lessonPlanUtils';
 import { useLocalize } from '~/hooks';
 import { AgentCard } from '~/pages/apps/components/AgentCard';
 
 interface ExploreAgentCardProps extends ComponentProps<typeof AgentCard> {}
 
 export function ExploreAgentCard(props: ExploreAgentCardProps) {
-  const navigate = useNavigate();
   const localize = useLocalize();
+  const location = useLocation();
   const { agent } = props;
+  const customChatUrl = useHref(
+    `/custom-app/${encodeURIComponent(agent.id)}/${agent.flow_type}`,
+  );
 
   const handleCustomChat = () => {
-    navigate(`/custom-app/${encodeURIComponent(agent.id)}/${agent.flow_type}?from=explore&returnTo=%2Fapps%2Fexplore`, {
-      state: { appSurfaceReturn: '/apps/explore' },
-    });
+    let search = lessonPlanSearch(agent.id, location.search);
+    if (agent.id === CUSTOM_APP_IDS.lessonPlan && !lessonPlanTarget(search)) {
+      const params = new URLSearchParams(search);
+      params.set('cache_id', Date.now().toString());
+      search = `?${params.toString()}`;
+    }
+    window.open(`${customChatUrl}${search}`, '_blank', 'noopener,noreferrer');
   };
 
   return (

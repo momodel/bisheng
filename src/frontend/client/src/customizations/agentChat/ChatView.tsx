@@ -137,7 +137,7 @@ export function ChatView({ data, cid, v, readOnly, isGuestMode = false }) {
                     <div className="relative flex min-w-0 flex-1 min-h-0 flex-col overflow-hidden">
                         <HeaderTitle readOnly={readOnly} hideShare={hideShare} conversation={{ title: headerTitle, flowId: data.id, conversationId: cid, flowType: data.flow_type }}/>
                         <div className="flex min-h-0 flex-1 overflow-hidden">
-                            <div className="relative mx-auto h-full min-h-0 w-full max-w-[800px] flex-1">
+                            <div className="relative h-full min-h-0 min-w-0 w-full flex-1">
                                 <ChatMessages useName={user?.username} title={data.name} logo={Logo} readOnly={readOnly} isGuestMode={isGuestMode} disabledSearch={data.flow_type === 10} onOpenCitationPanel={onOpenCitationPanel} activeCitationMessageId={activeCitationMessageId} selectionActive={!!(cid && selectionState.active && selectionState.chatId === cid)}/>
                             </div>
                         </div>

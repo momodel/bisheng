@@ -54,7 +54,7 @@ export function HtmlCoursewarePreview() {
         <Button size="medium" loading={downloading} disabled={downloading} onClick={handleDownload}>{t('htmlCourseware.download')}</Button>
       </div>
     </header>
-    <iframe src={url} title={t('htmlCourseware.previewTitle')} sandbox="allow-scripts allow-popups"
+    <iframe src={url} title={t('htmlCourseware.previewTitle')} sandbox="allow-scripts allow-popups allow-same-origin"
       referrerPolicy="no-referrer" className="block min-h-0 w-full flex-1 border-0 bg-white" />
   </main>;
 }

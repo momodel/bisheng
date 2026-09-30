@@ -6,11 +6,13 @@ import { HtmlCoursewareCard } from './HtmlCoursewareCard';
 interface HtmlCoursewareMessageProps extends ComponentProps<typeof Markdown> {
   complete: boolean;
   readOnly: boolean;
+  generating?: boolean;
 }
 
-export function HtmlCoursewareMessage({ content, complete, readOnly, ...markdownProps }: HtmlCoursewareMessageProps) {
+export function HtmlCoursewareMessage({ content, complete, readOnly, generating = false, ...markdownProps }: HtmlCoursewareMessageProps) {
   const blocks = useMemo(() => parseFencedBlocks(content, 'html'), [content]);
   return <>{blocks.map(block => block.kind === 'custom'
-    ? <HtmlCoursewareCard key={block.offset} html={block.content} ready={complete && block.complete} readOnly={readOnly} />
+    ? <HtmlCoursewareCard key={block.offset} html={block.content} ready={complete && block.complete} readOnly={readOnly}
+        generating={generating} />
     : <Markdown key={block.offset} {...markdownProps} content={block.content} />)}</>;
 }

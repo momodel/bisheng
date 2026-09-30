@@ -114,7 +114,7 @@ export function MessageBs({ logo, title, data, readOnly, isGuestMode = false, on
                                             ? <QuestionMessageContent key={messageId} content={message} complete={data.end && !('interrupted' in data && data.interrupted)} readOnly={!!readOnly || isGuestMode}
                                                 isLatestMessage={false} webContent={undefined} citations={data.citations} messageId={messageId} onOpenCitationPanel={onOpenCitationPanel}/>
                                             : fid === CUSTOM_APP_IDS.htmlCourseware
-                                                ? <HtmlCoursewareMessage key={messageId} content={message} complete={data.end && !('interrupted' in data && data.interrupted)} readOnly={!!readOnly || isGuestMode}
+                                                ? <HtmlCoursewareMessage key={messageId} content={message} complete={data.end && !('interrupted' in data && data.interrupted)} generating={!data.end} readOnly={!!readOnly || isGuestMode}
                                                     isLatestMessage={false} webContent={undefined} citations={data.citations} messageId={messageId} onOpenCitationPanel={onOpenCitationPanel}/>
                                                 : fid === CUSTOM_APP_IDS.lessonPlan
                                                     ? <LessonPlanMessage key={messageId} content={message} complete={data.end && !('interrupted' in data && data.interrupted)} readOnly={!!readOnly || isGuestMode}

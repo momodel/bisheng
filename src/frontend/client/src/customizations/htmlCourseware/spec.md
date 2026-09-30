@@ -16,6 +16,6 @@
 
 POST `/pyapi/cloud_disk/upload_html`，请求 `{html_content}`，返回原始对象或 `{response: {name, url, size, cloud_disk_id}}`。由后端生成文件名并归档到网页课件目录。
 
-预览保留 `sandbox="allow-scripts allow-popups"`，不允许 `allow-same-origin`；因此跨域 DOM 高度不可测，使用固定预览高度和内滚动。外部资源需要浏览器能访问其地址；这里不新增资源代理。生成输出约定为完整 HTML 文档的 `html` 围栏。
+聊天内的 srcDoc 预览保留 `sandbox="allow-scripts allow-popups"`，不允许 `allow-same-origin`，并在课件脚本之前注入内存存储兼容层，避免访问 localStorage/sessionStorage 中断初始化；聊天内预览进度不会跨刷新保存。独立预览页直接通过 `src={url}` 加载云盘文件，使用 `sandbox="allow-scripts allow-popups allow-same-origin"`，允许课件使用自身来源的真实存储；云盘课件应部署在可信且与主站不同源的地址。使用固定预览高度和内滚动。外部资源需要浏览器能访问其地址；这里不新增资源代理。生成输出约定为完整 HTML 文档的 `html` 围栏。
 
 下载优先使用当前标签页中与云盘 URL 匹配的源码，避免存储服务的跨域下载限制。独立打开且没有源码缓存时，尝试读取云盘文件，且不发送主站 Authorization；若云盘不允许跨域读取或访问失败，提示从原对话重新打开。sessionStorage 不可用或容量不足时仍允许预览，下载走云盘读取路径。
