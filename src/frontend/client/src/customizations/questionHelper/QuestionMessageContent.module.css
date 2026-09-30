@@ -3,6 +3,15 @@
   overflow-wrap: anywhere;
 }
 
+/* Display code as ordinary text while preserving meaningful whitespace. */
+.codeText {
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  tab-size: 4;
+}
+
 /* Keep exam details compact without changing the shared chat typography. */
 .examBody blockquote {
   margin: 0.75rem 0;
