@@ -8,6 +8,7 @@ import { copyTrackingApi, disLikeCommentApi, likeChatApi } from "~/api/apps";
 import { MessageFeedbackButtons } from "~/components/Chat/MessageFeedbackButtons";
 import { TextToSpeechButton } from "~/components/Voice/TextToSpeechButton";
 import { chatIdState, chatsState } from "~/customizations/agentChat/store/atoms";
+import { CUSTOM_CHAT_VISIBILITY } from "~/customizations/agentChat/customChatVisibility";
 const ACTION_BTN = "flex size-6 items-center justify-center rounded-md transition-colors hover:bg-fill-1";
 interface MessageButtonsProps { id?: number; text: string; onCopy: () => void; data?: number; children?: React.ReactNode; }
 export function MessageButtons({ id, text, onCopy, data, children = null }: MessageButtonsProps) {
@@ -42,13 +43,13 @@ export function MessageButtons({ id, text, onCopy, data, children = null }: Mess
     };
     return <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         {children}
-        <TextToSpeechButton messageId={String(id)} text={text}/>
-        <button type="button" className={ACTION_BTN} onClick={handleCopy} title={copied ? i18n.t("com_ui_copied") : i18n.t("com_ui_copy")} aria-label={i18n.t("com_ui_copy")}>
+        {CUSTOM_CHAT_VISIBILITY.showMessageSpeech && <TextToSpeechButton messageId={String(id)} text={text}/>}
+        {CUSTOM_CHAT_VISIBILITY.showMessageCopy && <button type="button" className={ACTION_BTN} onClick={handleCopy} title={copied ? i18n.t("com_ui_copied") : i18n.t("com_ui_copy")} aria-label={i18n.t("com_ui_copy")}>
             {copied
             ? <Outlined.Copied size={14} className="text-blue-500"/>
             : <Outlined.Copy size={14} className="text-text-3"/>}
-        </button>
-        <MessageFeedbackButtons liked={data} onLike={handleLike} onDislikeComment={(comment) => disLikeCommentApi(id, comment)}/>
+        </button>}
+        {CUSTOM_CHAT_VISIBILITY.showMessageFeedback && <MessageFeedbackButtons liked={data} onLike={handleLike} onDislikeComment={(comment) => disLikeCommentApi(id, comment)}/>}
     </div>;
 }
 ;

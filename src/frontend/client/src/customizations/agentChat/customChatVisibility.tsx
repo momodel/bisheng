@@ -16,4 +16,11 @@ export const CUSTOM_CHAT_VISIBILITY = {
     showAppSwitcherTrigger: false,
     // HeaderTitle Linsight workspace action.
     showWorkspaceButton: false,
+    // Assistant message footer actions; keep only copying visible by default.
+    showMessageCopy: true,
+    showMessageReferences: false,
+    showMessageTimestamp: true,
+    showMessageExport: false,
+    showMessageSpeech: false,
+    showMessageFeedback: false,
 };

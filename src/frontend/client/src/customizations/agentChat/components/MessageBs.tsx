@@ -17,6 +17,7 @@ import { QuestionMessageContent } from '~/customizations/questionHelper/Question
 import { CUSTOM_APP_IDS } from '~/customizations/config';
 import { HtmlCoursewareMessage } from '~/customizations/htmlCourseware/HtmlCoursewareMessage';
 import { LessonPlanMessage } from '~/customizations/lessonPlan/LessonPlanMessage';
+import { CUSTOM_CHAT_VISIBILITY } from '~/customizations/agentChat/customChatVisibility';
 export const ReasoningLog = ({ loading, msg = '' }) => {
     const t = useLocalize();
     const [open, setOpen] = useState(true);
@@ -132,10 +133,10 @@ export function MessageBs({ logo, title, data, readOnly, isGuestMode = false, on
             </>}
             
             {data.end && <div className="flex justify-between">
-                    <CitationReferencesDrawer content={referenceContent} webContent={referenceWebContent} citations={(data as any).citations} messageId={String(data.id)} desktopMode={onOpenCitationPanel ? "inline-panel" : "overlay"} open={onOpenCitationPanel ? activeCitationMessageId === String(data.id) : undefined} onDesktopOpen={onOpenCitationPanel} buttonClassName="ml-4"/>
+                    {CUSTOM_CHAT_VISIBILITY.showMessageReferences && <CitationReferencesDrawer content={referenceContent} webContent={referenceWebContent} citations={(data as any).citations} messageId={String(data.id)} desktopMode={onOpenCitationPanel ? "inline-panel" : "overlay"} open={onOpenCitationPanel ? activeCitationMessageId === String(data.id) : undefined} onDesktopOpen={onOpenCitationPanel} buttonClassName="ml-4"/>}
                     {!readOnly && <MessageButtons id={data.id} data={data.liked} text={message} onCopy={handleCopyMessage}>
-                        <span className="text-slate-400 text-sm pt-0.5">{formatStrTime(data.create_time, i18n.t("com_app.custom_message_date"))}</span>
-                        {chatId && messageId && (<ExportSelectionButton chatId={chatId} messageId={messageId}/>)}
+                        {CUSTOM_CHAT_VISIBILITY.showMessageTimestamp && <span className="text-slate-400 text-sm pt-0.5">{formatStrTime(data.create_time, i18n.t("com_app.custom_message_date"))}</span>}
+                        {CUSTOM_CHAT_VISIBILITY.showMessageExport && chatId && messageId && (<ExportSelectionButton chatId={chatId} messageId={messageId}/>)}
                     </MessageButtons>}
                 </div>}
         </div>

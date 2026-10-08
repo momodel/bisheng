@@ -38,6 +38,8 @@
 
 修改以上副本，不要修改 `src/pages/appChat/`、原 `routes/AppRoot.tsx` 或原 `layouts/MainLayout.tsx` 来实现定制效果。
 
+助手消息底部通过 `customChatVisibility.tsx` 的 `showMessage*` 开关控制，默认仅显示复制按钮；引用入口、时间、消息导出、朗读和赞踩反馈均隐藏。将对应开关设为 `true` 可恢复，不影响原版 `/app` 聊天或课件卡片自身的操作按钮。
+
 ### 手机与桌面布局断点
 
 `customChatVisibility.tsx` 中的 `CUSTOM_CHAT_LAYOUT.mobileMaxWidth` 默认为 `767`：宽度 ≥768px 时保留 240px 会话侧栏、56px 标题栏及桌面边距，包括 768–1023px 的小窗口；≤767px 时使用手机布局，隐藏固定侧栏，通过移动端标题下拉查看历史，并保留新建会话和聊天操作。所有定制导航使用 `useCustomChatMobileLayout()` 的统一判断，不依赖全局 `touch-mobile` 的 1023px 断点。手机端系统菜单、返回、分享同样遵守 `CUSTOM_CHAT_VISIBILITY`，关闭时不渲染对应入口。聊天内容区仍随可用宽度调整，不会把整个页面等比缩放；原版 `/app/...` 不受影响。
