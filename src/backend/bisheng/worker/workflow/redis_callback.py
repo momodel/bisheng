@@ -678,7 +678,8 @@ class RedisCallback(BaseCallback):
         self.new_session.name = "New Chat"
 
         question = ""
-        input_message = ChatMessageDao.get_messages_by_chat_id(self.chat_id, [WorkflowEventType.UserInput.value], 1)
+        # The input event contains the node schema; the submitted text is stored as a question.
+        input_message = ChatMessageDao.get_messages_by_chat_id(self.chat_id, ["question"], 1)
         if input_message:
             question = input_message[0].message
 
