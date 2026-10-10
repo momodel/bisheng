@@ -98,6 +98,8 @@
   "10622": "Password must be at least 8 characters and include uppercase, lowercase, number, and symbol",
   "10630": "User group cannot be empty",
   "10640": "Cannot modify admin account",
+  "10641": "Your personal model key is not bound. Contact an administrator",
+  "10642": "The model key binding conflicts with the user or configured gateway",
   "10700": "Tag already exists",
   "10701": "Tag not found",
   "10800": "Provider name already exists",

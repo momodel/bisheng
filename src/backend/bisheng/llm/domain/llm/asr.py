@@ -1,17 +1,22 @@
-from typing import Union, BinaryIO
+from typing import BinaryIO, Self, Union
 
 import httpx
 from pydantic import Field
-from typing_extensions import Self
 
-from bisheng.common.errcode.server import NoAsrModelConfigError, AsrModelConfigDeletedError, AsrModelTypeError, \
-    AsrProviderDeletedError, \
-    AsrModelOfflineError
-from bisheng.core.ai import BaseASRClient, OpenAIASRClient, AliyunASRClient, AzureOpenAIASRClient
+from bisheng.common.errcode.server import (
+    AsrModelConfigDeletedError,
+    AsrModelOfflineError,
+    AsrModelTypeError,
+    AsrProviderDeletedError,
+    NoAsrModelConfigError,
+)
+from bisheng.core.ai import AliyunASRClient, AzureOpenAIASRClient, BaseASRClient, OpenAIASRClient
 from bisheng.llm.domain.const import LLMModelType, LLMServerType
 from bisheng.llm.domain.models import LLMModel, LLMServer
-from .base import BishengBase
+from bisheng.user.domain.services.newapi import NewApiCredentialService
+
 from ..utils import wrapper_bisheng_model_limit_check_async
+from .base import BishengBase
 
 
 async def _get_openai_params(params: dict, server_info: LLMServer, model_info: LLMModel) -> dict:
@@ -45,18 +50,9 @@ async def _get_qwen_params(params: dict, server_info: LLMServer, model_info: LLM
 
 
 _asr_client_type = {
-    LLMServerType.OPENAI.value: {
-        "client": OpenAIASRClient,
-        "params_handler": _get_openai_params
-    },
-    LLMServerType.AZURE_OPENAI.value: {
-        "client": AzureOpenAIASRClient,
-        "params_handler": _get_azure_openai_params
-    },
-    LLMServerType.QWEN.value: {
-        "client": AliyunASRClient,
-        "params_handler": _get_qwen_params
-    }
+    LLMServerType.OPENAI.value: {"client": OpenAIASRClient, "params_handler": _get_openai_params},
+    LLMServerType.AZURE_OPENAI.value: {"client": AzureOpenAIASRClient, "params_handler": _get_azure_openai_params},
+    LLMServerType.QWEN.value: {"client": AliyunASRClient, "params_handler": _get_qwen_params},
 }
 
 
@@ -65,12 +61,12 @@ class BishengASR(BishengBase):
 
     @classmethod
     async def get_bisheng_asr(cls, **kwargs) -> Self:
-        model_id = kwargs.pop('model_id', 0)
+        model_id = kwargs.pop("model_id", 0)
         if not model_id:
             raise NoAsrModelConfigError()
         model_info, server_info = await cls.get_model_server_info(model_id)
         # ignore_onlineParameters are used to skip model presence checks
-        ignore_online = kwargs.pop('ignore_online', False)
+        ignore_online = kwargs.pop("ignore_online", False)
 
         if not model_info:
             raise AsrModelConfigDeletedError()
@@ -82,12 +78,14 @@ class BishengASR(BishengBase):
             raise AsrModelOfflineError(server_name=server_info.name, model_name=model_info.model_name)
 
         # InisialisasiasrClient
-        asr_client = await cls.init_asr_client(model_info=model_info, server_info=server_info)
+        asr_client = await cls.init_asr_client(
+            model_info=model_info, server_info=server_info, user_id=kwargs["user_id"]
+        )
 
         return cls(model_id=model_id, asr=asr_client, model_info=model_info, server_info=server_info, **kwargs)
 
     @classmethod
-    async def init_asr_client(cls, model_info: LLMModel, server_info: LLMServer) -> BaseASRClient:
+    async def init_asr_client(cls, model_info: LLMModel, server_info: LLMServer, user_id: int = 0) -> BaseASRClient:
         params = {}
         if server_info.config:
             if server_info.config:
@@ -95,10 +93,11 @@ class BishengASR(BishengBase):
             if model_info.config:
                 params.update(model_info.config)
         if server_info.type not in _asr_client_type:
-            raise Exception(f'asrModel not supported{server_info.type}Type of service provider')
-        params_handler = _asr_client_type[server_info.type]['params_handler']
+            raise Exception(f"asrModel not supported{server_info.type}Type of service provider")
+        params_handler = _asr_client_type[server_info.type]["params_handler"]
         new_params = await params_handler(params, server_info, model_info)
-        client = _asr_client_type[server_info.type]['client'](**new_params)
+        new_params = NewApiCredentialService.model_params(new_params, user_id)
+        client = _asr_client_type[server_info.type]["client"](**new_params)
         return client
 
     @wrapper_bisheng_model_limit_check_async

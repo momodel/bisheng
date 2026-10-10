@@ -795,6 +795,7 @@ class Settings(BaseModel):
     jwt_secret: str = "secret_cF2kD4lW9wY4zL7eX1zX9vS1fA7eW4lQ"
     gpts: dict = {}
     openai_conf: dict = {}
+    newapi_base_url: str = Field(default="", description="NEW API gateway URL; empty disables personal model billing")
     minio_conf: dict = {}
     linsight_conf: LinsightConf = LinsightConf()
     logger_conf: LoggerConf = LoggerConf()

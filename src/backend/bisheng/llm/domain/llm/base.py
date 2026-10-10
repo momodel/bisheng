@@ -1,10 +1,11 @@
-from typing import Optional, Dict
+from typing import Self
 
-from pydantic import BaseModel, Field, ConfigDict
-from typing_extensions import Self
+from pydantic import BaseModel, ConfigDict, Field
 
 from bisheng.common.constants.enums.telemetry import ApplicationTypeEnum
-from ..models import LLMModel, LLMServer, LLMDao
+from bisheng.user.domain.services.newapi import NewApiCredentialService
+
+from ..models import LLMDao, LLMModel, LLMServer
 from ..share_fallback import (
     aget_model_by_id_with_share_fallback,
     aget_server_by_id_with_share_fallback,
@@ -17,28 +18,28 @@ class BishengBase(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_by_name=True, validate_by_alias=True)
 
     model_id: int = Field(description="Saved by backend servicemodelUniqueness quantificationID")
-    model_name: str = Field(default='', description='model name in mysql')
+    model_name: str = Field(default="", description="model name in mysql")
 
     # field for telemetry logging
-    app_id: str = Field(..., description='application id')
-    app_type: ApplicationTypeEnum = Field(..., description='application type')
-    app_name: str = Field(..., description='application name')
-    user_id: int = Field(..., description='invoke user id')
+    app_id: str = Field(..., description="application id")
+    app_type: ApplicationTypeEnum = Field(..., description="application type")
+    app_name: str = Field(..., description="application name")
+    user_id: int = Field(..., description="invoke user id")
 
     # bishengStrongly related business parameters
-    model_info: Optional[LLMModel] = Field(default=None, description="Model Configuration Information")
-    server_info: Optional[LLMServer] = Field(default=None, description="Service Provider Information")
+    model_info: LLMModel | None = Field(default=None, description="Model Configuration Information")
+    server_info: LLMServer | None = Field(default=None, description="Service Provider Information")
 
     @classmethod
-    async def get_class_instance(cls, **kwargs: Dict) -> Self:
-        model_id: int | None = kwargs.pop('model_id', None)
+    async def get_class_instance(cls, **kwargs: dict) -> Self:
+        model_id: int | None = kwargs.pop("model_id", None)
         model_info, server_info = await cls.get_model_server_info(model_id)
         instance = cls(
             model_id=model_id,
             model_name=model_info.model_name,
             model_info=model_info,
             server_info=server_info,
-            **kwargs
+            **kwargs,
         )
         return instance
 
@@ -53,7 +54,8 @@ class BishengBase(BaseModel):
         if not model_info:
             return None, None
         server_info = await aget_server_by_id_with_share_fallback(
-            model_info.server_id, cache=True,
+            model_info.server_id,
+            cache=True,
         )
         return model_info, server_info
 
@@ -65,18 +67,20 @@ class BishengBase(BaseModel):
         if not model_info:
             return None, None
         server_info = get_server_by_id_with_share_fallback(
-            model_info.server_id, cache=True,
+            model_info.server_id,
+            cache=True,
         )
         return model_info, server_info
 
-    async def update_model_status(self, status: int, remark: str = ''):
+    async def update_model_status(self, status: int, remark: str = ""):
         """Update model status"""
         if self.model_info.status != status:
             self.model_info.status = status
-            await LLMDao.aupdate_model_status(self.model_id, status,
-                                              remark[-500:])  # Limit note length to500characters.
+            await LLMDao.aupdate_model_status(
+                self.model_id, status, remark[-500:]
+            )  # Limit note length to500characters.
 
-    def sync_update_model_status(self, status: int, remark: str = ''):
+    def sync_update_model_status(self, status: int, remark: str = ""):
         """Update model status"""
         if self.model_info.status != status:
             self.model_info.status = status
@@ -84,8 +88,11 @@ class BishengBase(BaseModel):
 
     def get_server_info_config(self):
         if self.server_info and self.server_info.config:
-            return self.server_info.config
+            return dict(self.server_info.config)
         return {}
+
+    def personal_model_params(self, params: dict) -> dict:
+        return NewApiCredentialService.model_params(params, self.user_id)
 
     def get_model_info_config(self):
         if self.model_info and self.model_info.config:

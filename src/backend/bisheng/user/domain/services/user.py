@@ -41,6 +41,7 @@ from bisheng.database.models.user_group import UserGroupDao
 from bisheng.permission.domain.services.legacy_rbac_sync_service import LegacyRBACSyncService
 from bisheng.user.domain.models.user import User, UserCreate, UserDao, UserLogin, UserRead
 from bisheng.user.domain.models.user_role import UserRoleDao
+from bisheng.user.domain.repositories.implementations.user_repository_impl import UserRepositoryImpl
 from bisheng.utils import generate_uuid, get_request_ip, md5_hash
 from bisheng.utils.constants import RSA_KEY
 
@@ -69,7 +70,7 @@ PASSWORD_STRENGTH_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W
 class UserService:
     @classmethod
     async def ainvalidate_jwt_after_account_disabled(cls, user_id: int) -> None:
-        """禁用账号后立刻让已签发的 JWT 失效（F012 ``token_version``），并清理管理端 scope 缓存。"""
+        """Revoke issued JWTs after disabling an account and clear the admin scope cache."""
         try:
             await UserDao.aincrement_token_version(user_id)
         except Exception as exc:
@@ -144,7 +145,7 @@ class UserService:
 
     @classmethod
     def decrypt_password_plain(cls, password: str) -> str:
-        """RSA 解密得到明文密码（未做 MD5）；无 RSA 配置时视为明文开发模式。"""
+        """Decrypt the RSA password before hashing, with plaintext fallback for development."""
         if value := get_redis_client_sync().get(RSA_KEY):
             private_key = value[1]
             return rsa.decrypt(b64decode(password), private_key).decode("utf-8")
@@ -194,9 +195,17 @@ class UserService:
         """
         Create User
         """
+        if req_data.mo_user_id and req_data.mo_backend_token is None:
+            raise UserValidateError()
         if req_data.mo_backend_token is not None:
             if not cls.validate_mo_backend_token(req_data.mo_backend_token):
                 raise UserValidateError()
+            if req_data.mo_user_id:
+                existing = UserRepositoryImpl.get_mo_user(req_data.mo_user_id)
+                if existing:
+                    if existing.delete:
+                        raise UserForbiddenError()
+                    return existing
             password = md5_hash(req_data.password)
         else:
             password = cls.decrypt_md5_password_strict(req_data.password)
@@ -204,11 +213,11 @@ class UserService:
         user = User(
             user_name=req_data.user_name,
             password=password,
-            source="local",
+            source="mo" if req_data.mo_user_id else "local",
             # Default external_id to user_name so password login (which queries
             # external_id only since 94323e3ec) works out of the box. SSO-synced
             # users set their own external_id via org_sync, not through here.
-            external_id=req_data.user_name,
+            external_id="mo:" + req_data.mo_user_id if req_data.mo_user_id else req_data.user_name,
         )
         group_ids = []
         role_ids = []
@@ -279,7 +288,7 @@ class UserService:
             raise UserValidateError(msg="Person ID already exists")
         db_user.external_id = person_id
 
-        # 允许用户名重复；人员唯一性由 external_id / user_id 等保证
+        # Allow duplicate usernames; external_id and user_id identify the person.
         if len(db_user.user_name) > 30:
             raise UserNameTooLongError()
         db_user.password = cls.decrypt_md5_password_strict(user.password)
@@ -330,7 +339,7 @@ class UserService:
 
     @classmethod
     async def _ensure_user_guest_department_membership(cls, user_id: int) -> None:
-        """注册完成后自动加入“临时访客”部门（主部门）。"""
+        """Join the guest department as the primary department after registration."""
         from sqlmodel import select
 
         from bisheng.database.models.department import Department, UserDepartment
@@ -409,9 +418,9 @@ class UserService:
         role_ids: list[int] | None = None,
         is_department_admin: bool | None = None,
     ) -> UnifiedResponseModel | None:
-        """无角色且非部门/用户组管理员时拒绝登录；有角色但生效菜单既不包含工作台也不包含管理后台时拒绝登录。
+        """Deny login without an eligible role or an accessible workspace/admin menu.
 
-        需审批模式下角色可仅勾选一级菜单（workstation/admin）而无二级项，仍视为有菜单权限，允许登录。
+        Approval roles may grant only a top-level workstation/admin menu, which still allows login.
         """
         # Pre-tenant-context check: any role/dept/group access across all tenants
         # qualifies for login. Without bypass, every DAO below trips
@@ -454,10 +463,10 @@ class UserService:
             if not user.captcha_key or not await verify_captcha(user.captcha, user.captcha_key):
                 raise CaptchaError()
 
-        # 支持用户名或 external_id；重名时对候选用户依次校验密码
+        # Validate candidate passwords in order for accounts with duplicate names.
         candidates = await UserDao.aget_login_candidates_by_account(user.user_name)
         if not candidates:
-            # 禁用账号不会进入候选列表；单独提示，避免与「账号或密码错误」混淆
+            # Report disabled accounts separately because the candidate query excludes them.
             if await UserDao.aexists_disabled_login_account(user.user_name):
                 return UserForbiddenError.return_resp()
             return UserValidateError.return_resp()
@@ -476,7 +485,7 @@ class UserService:
             except UserPasswordMaxTryError:
                 raise
             except UserValidateError:
-                # 该候选用户密码不匹配，尝试下一个同名账号
+                # Try the next candidate after a password mismatch.
                 continue
         if not db_user:
             return UserValidateError.return_resp()
@@ -538,7 +547,7 @@ class UserService:
             active_tenants = [t for t in user_tenants if t.get("status") == "active"]
 
             if len(active_tenants) == 0:
-                # 注册/历史数据可能未写入 user_tenant；若默认租户存在则自动挂接，避免无法登录
+                # Attach legacy users to the default tenant if their tenant membership is missing.
                 code = (settings.multi_tenant.default_tenant_code or "default").strip() or "default"
                 with bypass_tenant_filter():
                     default_tenant = await TenantDao.aget_by_code(code)
@@ -694,9 +703,9 @@ class UserService:
     def get_user_all_info(
         cls,
         *,
-        start_time: datetime = None,
-        end_time: datetime = None,
-        user_ids: list[int] = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        user_ids: list[int] | None = None,
         page: int = 1,
         page_size: int = 100,
     ) -> list[User]:

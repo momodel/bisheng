@@ -1,3 +1,6 @@
+# Empty disables personal NEW API credentials. Use the gateway root URL.
+newapi_base_url: ""
+
 knowledges: # 知识库相关配置
   loader_provider: "etl4lm" # 文档解析模型提供商，支持etl4lm、mineru、paddle_ocr三种选项，默认为etl4lm
   etl4lm:

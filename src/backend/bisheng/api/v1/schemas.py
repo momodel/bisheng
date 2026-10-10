@@ -142,7 +142,7 @@ class FlowGptsOnlineList(BaseModel):
     logo: str = None
     create_time: datetime = None
     update_time: datetime = None
-    flow_type: str = None  # flow: Skill assistant：gptsassistant
+    flow_type: str = None  # flow: Skill assistant: gptsassistant
     count: int = 0
 
 
@@ -150,7 +150,7 @@ class ChatMessage(BaseModel):
     """Chat message schema."""
 
     is_bot: bool = False
-    message: Union[str, None, dict, list] = ""
+    message: Union[str, dict, list, None] = ""
     type: str = "human"
     category: str = "processing"  # system processing answer tool
     intermediate_steps: str | None = None
@@ -263,7 +263,7 @@ class AssistantUpdateReq(BaseModel):
     name: str | None = Field("", description="The assistant name. Leave empty to not update")
     desc: str | None = Field("", description="Assistant description Leave empty to not update")
     logo: str | None = Field("", description="logoRelative address of the file, empty to not update")
-    prompt: str | None = Field("", description="Visible to Userprompt， Leave empty to not update")
+    prompt: str | None = Field("", description="Visible to Userprompt, Leave empty to not update")
     guide_word: str | None = Field("", description="Ice Breaker  Leave empty to not update")
     guide_question: list | None = Field([], description="Guided Question List, Leave empty to not update")
     model_name: str | None = Field("", description="Selected model name, Leave empty to not update")
@@ -345,6 +345,7 @@ class GroupAndRoles(BaseModel):
 
 
 class CreateUserReq(BaseModel):
+    mo_user_id: str | None = Field(default=None, min_length=1, max_length=128)
     user_name: str = Field(max_length=30, description="Username")
     password: str = Field(description="Passwords")
     mo_backend_token: str | None = Field(

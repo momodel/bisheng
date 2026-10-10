@@ -203,9 +203,12 @@ class ToolExecutor(BaseTool):
 
     @classmethod
     def _init_api_tool(
-        cls, tool: GptsTools, tool_type: GptsToolsType, callbacks: Callbacks = None, **kwargs
+        cls, tool: GptsTools, tool_type: GptsToolsType, *, user_id: int, callbacks: Callbacks = None, **kwargs
     ) -> BaseTool:
+        from bisheng.user.domain.services.newapi import NewApiCredentialService
+
         tool_params = cls.parse_api_tool_params(tool, tool_type, **kwargs)
+        tool_params = NewApiCredentialService.tool_params(tool_params, user_id)
         tool = OpenApiTools.get_api_tool(tool.tool_key, **tool_params)
         tool.callbacks = callbacks
         return tool
@@ -238,7 +241,7 @@ class ToolExecutor(BaseTool):
         if tool.is_preset == ToolPresetType.PRESET.value:
             tool_instance = cls._init_preset_tool(tool, tool_type, **kwargs)
         elif tool.is_preset == ToolPresetType.API.value:
-            tool_instance = cls._init_api_tool(tool, tool_type, **kwargs)
+            tool_instance = cls._init_api_tool(tool, tool_type, user_id=user_id, **kwargs)
         elif tool.is_preset == ToolPresetType.MCP.value:
             tool_instance = cls._init_mcp_tool(tool, tool_type, **kwargs)
         else:
