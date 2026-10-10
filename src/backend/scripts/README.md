@@ -2,6 +2,39 @@
 
 This directory contains manual maintenance and migration scripts for the backend.
 
+## Application Migration Scripts
+
+### `migrate_mo_apps.py`
+
+在源环境导出标签为 `MO` 的工作流和助手，并在目标环境保留应用 ID 导入。脚本会迁移非删除的工作流版本和被引用的 API 自定义工具；工具认证在目标端固定为“无”，不导出 API Key。导入应用统一归属全局超级管理员 `admin`、保持下线状态，并给目标租户根部门授予 `viewer`（包含子部门）。
+
+源环境导出：
+
+```bash
+export config=config.yaml
+PYTHONPATH=./ .venv/bin/python scripts/migrate_mo_apps.py export \
+  --tenant-id 1 \
+  --output /tmp/mo-apps.json
+```
+
+将 JSON 安全传到目标环境后，先执行只读预检，再显式写入：
+
+```bash
+export config=config.yaml
+PYTHONPATH=./ .venv/bin/python scripts/migrate_mo_apps.py import \
+  --tenant-id 1 \
+  --bundle /tmp/mo-apps.json
+
+PYTHONPATH=./ .venv/bin/python scripts/migrate_mo_apps.py import \
+  --tenant-id 1 \
+  --bundle /tmp/mo-apps.json \
+  --apply
+```
+
+预检会校验应用 ID/工具名称冲突、`admin` 超管身份、根部门、OpenFGA `viewer` 模型、目标助手/工作流默认 LLM 和预置工具依赖。助手与工作流分别改用目标“系统模型设置”中的默认模型；缺失、下线或类型错误时整批阻止导入。OpenAPI 声明认证时会输出 `AUTH_CONFIGURATION_REQUIRED` 警告，导入后由管理员重新配置。
+
+当前明确不迁移 MCP 和知识库。MCP 被引用时会阻止整批操作；助手知识库关联不会进入迁移包，工作流中的知识库选择、元数据过滤和对应 rerank 设置会被清空，并输出 `KNOWLEDGE_REFERENCE_DROPPED` 警告。目标应用需要知识能力时必须重新配置。
+
 ## Export Scripts
 
 ### `export_daily_chat_messages.py`

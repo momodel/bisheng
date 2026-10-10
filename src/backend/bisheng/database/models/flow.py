@@ -3,9 +3,9 @@
 from collections.abc import Sequence
 from datetime import datetime
 from enum import Enum
-from typing import Union
+from typing import Annotated, Union
 
-from pydantic import field_validator
+from pydantic import AfterValidator, field_validator
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, and_, case, false, func, or_, text
 from sqlmodel import Field, col, select, update
 
@@ -100,12 +100,20 @@ class Flow(FlowBase, table=True):
     data: dict | None = Field(default=None, sa_column=Column(JsonType))
 
 
+def _normalize_logo_path(logo: str) -> str:
+    """Persist the icon path, without temporary share-link query parameters."""
+    return logo.partition("?")[0]
+
+
+FlowLogoPath = Annotated[str, AfterValidator(_normalize_logo_path)]
+
+
 class FlowCreate(SQLModelSerializable):
     name: str = Field(index=True)
     user_id: int | None = Field(default=None, index=True)
     description: str | None = Field(default=None, sa_column=Column(String(length=1000)))
     data: dict | None = Field(default=None)
-    logo: str | None = Field(default=None, index=False)
+    logo: FlowLogoPath | None = Field(default=None, index=False)
     status: int | None = Field(index=False, default=1)
     flow_type: int | None = Field(index=False, default=FlowType.WORKFLOW.value)
     is_shared: bool = Field(default=False)
@@ -141,7 +149,7 @@ class FlowReadWithStyle(FlowRead):
 
 class FlowUpdate(SQLModelSerializable):
     name: str | None = None
-    logo: str | None = None
+    logo: FlowLogoPath | None = None
     description: str | None = None
     data: dict | None = None
     status: int | None = None
