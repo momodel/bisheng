@@ -1,8 +1,9 @@
 // @ts-strict-ignore
 import { cname } from "@/components/bs-ui/utils";
 import { AppNumType, AppType } from "@/types/app";
+import { usePendingAction } from "@/hooks/usePendingAction";
 import { Copy, FilePlus, Settings, Shield, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillIcon } from "../../bs-icons";
 import { GoIcon } from "../../bs-icons/go";
@@ -105,15 +106,19 @@ export default function CardComponent<T>({
 }: IProps<T>) {
 
   const [_checked, setChecked] = useState(checked)
+  const { pending, runAction } = usePendingAction()
   const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => setChecked(checked), [checked])
 
   const { t, i18n } = useTranslation()
 
   const handleCheckedChange = async (bln) => {
     if (!canSwitch || !onCheckedChange) return false
-    const res = await onCheckedChange(bln, data)
-    if (res === false) return
-    setChecked(bln)
+    return runAction(async () => {
+      const res = await onCheckedChange(bln, data)
+      if (res === false) return
+      setChecked(bln)
+    })
   }
   const showActionBar = Boolean(
     onPermission ||
@@ -183,6 +188,8 @@ export default function CardComponent<T>({
         <div className="flex gap-1 items-center">
           {headSelecter}
           {showSwitch && <Switch
+            disabled={!canSwitch || pending}
+            aria-busy={pending}
             checked={_checked}
             className={i18next.language === 'ja' ? 'w-20' : 'w-12'}
             // @ts-ignore

@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next";
 import { Controls } from "./Controls";
 import CustomEdge from "./FlowEdge";
 import FlowNode from "./FlowNode";
-import Header from "./Header";
+import { WorkflowHeader } from "./Header";
 import NoteNode from "./NoteNode";
 import Sidebar from "./Sidebar";
 import useFlowStore from "./flowStore";
@@ -59,7 +59,6 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
      */
     useEffect(() => {
         if (reactFlowInstance && flow) {
-            console.log('数据更新 :>> ', reactFlowInstance.toObject());
             const { nodes, edges, viewport } = reactFlowInstance.toObject()
             flow.nodes = nodes
             flow.edges = edges
@@ -98,7 +97,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
     const [showApiPage, setShowApiPage] = useState(false)
 
     return <div className="flex flex-col h-full overflow-hidden">
-        <Header
+        <WorkflowHeader
             flow={flow}
             nodes={nodes}
             onTabChange={(type) => setShowApiPage('api' === type)}
@@ -113,7 +112,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                 const { nodes } = reactFlowInstance.toObject()
                 setNodes(nodes)
             }}
-        ></Header>
+        />
         <div className={`flex-1 min-h-0 overflow-hidden ${showApiPage ? 'hidden' : ''} relative`}>
             <Sidebar onInitStartNode={node => {
                 // start node
@@ -172,7 +171,6 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                             onNodeDragStart={onNodeDragStart} // 快照
                             onSelectionDragStart={onSelectionDragStart} // 快照
                             onNodesDelete={() => {
-                                console.log('【删除节点】');
                                 takeSnapshot(flow)
                             }} // 更新setEdges
                             // 自定义线组件

@@ -19,7 +19,7 @@ import { userContext } from "@/contexts/userContext";
 import { changeAssistantStatusApi, deleteAssistantApi } from "@/controllers/API/assistant";
 import { createAssistantsApi, getAssistantDetailApi, saveAssistanttApi } from "@/controllers/API/assistant";
 import { deleteFlowFromDatabase, getAppsApi, getFlowApi } from "@/controllers/API/flow";
-import { copyReportTemplate, createWorkflowApi, onlineWorkflow } from "@/controllers/API/workflow";
+import { copyReportTemplate, createWorkflowApi, onlineWorkflowApi } from "@/controllers/API/workflow";
 import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
 import { AppNumType, AppType } from "@/types/app";
 import { FlowType } from "@/types/flow";
@@ -33,7 +33,7 @@ import { useCreateTemp, useErrorPrompt, useQueryLabels } from "./hook";
 import CardSelectVersion from "./CardSelectVersion";
 import CreateTemp from "./CreateTemp";
 
-/** 按应用上线(2)/下线(1)状态筛选，与后端 ``/api/v1/workflow/list?status=`` 一致 */
+/** Filter by online (2) or offline (1), matching the application list API. */
 export const SelectAppStatus = ({ defaultValue = 'all', onChange }: { defaultValue?: string; onChange: (v: string) => void }) => {
     const [value, setValue] = useState(defaultValue)
     const { t } = useTranslation()
@@ -96,7 +96,7 @@ const APP_ACTIONS = [
     'manage_permission',
 ]
 
-export default function apps() {
+export function AppsPage() {
     const { t, i18n } = useTranslation()
     // useErrorPrompt();
 
@@ -107,15 +107,9 @@ export default function apps() {
     const { message } = useToast()
     const navigate = useNavigate()
 
-    // Build page lists apps the user can manage. Backend treats managed=true
-    // as "filter by edit" (admins still see everything via the admin
-    // short-circuit).
-    // F027: cursor-based infinite scroll; `total` / `page` / `setPage` are gone.
-    // `managed: true` is seeded via initial param so it flows through every
-    // request automatically; `filterData({tag_id|type|status: ...})` then
-    // mutates paramsRef and triggers a fresh first-page load.
+    // Visibility controls listing; individual actions control editing and publishing.
     const { data: dataSource, loading, hasMore, search, reload, loadMore, filterData, refreshData } = useInfiniteCursorTable<FlowType>(
-        { pageSize: 14, cancelLoadingWhenReload: true, managed: true },
+        { pageSize: 14, cancelLoadingWhenReload: true },
         (param) => getAppsApi({
             cursor: param.cursor,
             pageSize: param.pageSize,
@@ -123,7 +117,7 @@ export default function apps() {
             tag_id: param.tag_id,
             type: param.type,
             status: param.status,
-            managed: param.managed,
+            action: 'visible',
         }),
     )
 
@@ -222,23 +216,24 @@ export default function apps() {
 
     // on/off line
     const handleCheckedChange = (checked, data) => {
-        if (checked && !canPublish(data.id)) return;
-        if (!checked && !canUnpublish(data.id)) return;
+        if (checked && !canPublish(data.id)) return false;
+        if (!checked && !canUnpublish(data.id)) return false;
         if (data.flow_type === 5) {
             return captureAndAlertRequestErrorHoc(changeAssistantStatusApi(data.id, checked ? 2 : 1)).then(res => {
                 if (res === null) {
                     refreshData((item) => item.id === data.id, { status: checked ? 2 : 1 })
                 }
-                return res
+                return res === null
             })
         } else if (data.flow_type === 10) {
-            return captureAndAlertRequestErrorHoc(onlineWorkflow(data, checked ? 2 : 1)).then(res => {
-                if (res) {
+            return captureAndAlertRequestErrorHoc(onlineWorkflowApi({ flow_id: data.id, version_id: undefined, status: checked ? 2 : 1 })).then(res => {
+                if (res === null) {
                     refreshData((item) => item.id === data.id, { status: checked ? 2 : 1 })
                 }
-                return res
+                return res === null
             })
         }
+        return false
     }
 
     const typeCnNames = {
@@ -263,11 +258,8 @@ export default function apps() {
         })
     }
 
-    const { toast } = useToast()
     const handleSetting = (data) => {
-        if (!data.write) {
-            return toast({ variant: 'warning', description: '无编辑权限' })
-        }
+        if (!canRead(data.id)) return;
         if (data.flow_type === 5) {
             navigate(`/assistant/${data.id}`, { state: { flow: data } })
         } else {
@@ -353,7 +345,7 @@ export default function apps() {
                                     checked={item.status === 2}
                                     user={item.user_name}
                                     currentUser={user}
-                                    onClick={() => canEdit(item.id) && handleSetting(item)}
+                                    onClick={() => handleSetting(item)}
                                     // onSwitchClick={() => {
                                     //     !item.write && item.status !== 2 && message({
                                     //         description: t('build.noPermissionToPublish', { type: typeCnNames[item.flow_type] }),
@@ -371,7 +363,7 @@ export default function apps() {
                                     onCopy={canCreateApp && canRead(item.id) ? handleCopyApp : undefined}
                                     headSelecter={(
                                         item.version_list?.length ? <CardSelectVersion
-                                            showPop={item.status !== 2}
+                                            showPop={item.status !== 2 && canEdit(item.id)}
                                             data={item}
                                         /> : null)}
                                     labelPannel={

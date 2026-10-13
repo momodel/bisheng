@@ -14,10 +14,10 @@ import SharePage from "@/pages/Dashboard/share";
 
 // 异步加载页面组件
 const Templates = lazy(() => import("@/pages/BuildPage/appTemps"));
-const Apps = lazy(() => import("@/pages/BuildPage/apps"));
-const EditAssistantPage = lazy(() => import("@/pages/BuildPage/assistant/editAssistant"));
+const Apps = lazy(() => import("@/pages/BuildPage/apps").then(module => ({ default: module.AppsPage })));
+const EditAssistantPage = lazy(() => import("@/pages/BuildPage/assistant/editAssistant").then(module => ({ default: module.EditAssistantPage })));
 const WorkBenchPage = lazy(() => import("@/pages/BuildPage/bench/DialogueWork"));
-const FlowPage = lazy(() => import("@/pages/BuildPage/flow"));
+const FlowPage = lazy(() => import("@/pages/BuildPage/flow").then(module => ({ default: module.FlowPage })));
 const SkillToolsPage = lazy(() => import("@/pages/BuildPage/tools"));
 const DataSetPage = lazy(() => import("@/pages/DataSetPage"));
 const EvaluatingPage = lazy(() => import("@/pages/EvaluationPage"));

@@ -14,34 +14,48 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/bs-ui/popo
 import { RadioGroup, RadioGroupItem } from "@/components/bs-ui/radio";
 import { useToast } from "@/components/bs-ui/toast/use-toast";
 import { darkContext } from "@/contexts/darkContext";
-import { TabsContext } from "@/contexts/tabsContext";
-import { copyReportTemplate, createWorkFlowVersion, deleteVersion, getVersionDetails, getWorkFlowVersions, onlineWorkflow, onlineWorkflowApi, saveWorkflow, updateVersion } from "@/controllers/API/workflow";
+import { copyReportTemplate, createWorkFlowVersion, getVersionDetails, onlineWorkflow, onlineWorkflowApi, saveWorkflow, updateVersion } from "@/controllers/API/workflow";
 import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
+import { usePendingAction } from "@/hooks/usePendingAction";
 import { AppType } from "@/types/app";
-import { FlowVersionItem } from "@/types/flow";
+import type { WorkFlow } from "@/types/flow";
 import { flowVersionCompatible } from "@/util/flowCompatible";
-import { findParallelNodes, importFlow } from "@/util/flowUtils";
-import { cloneDeep, isEqual } from "lodash-es";
+import { importFlow } from "@/util/flowUtils";
+import { cloneDeep } from "lodash-es";
 import { ChevronLeft, EllipsisVertical, PencilLineIcon, Play, Shield, ShieldCheck } from "lucide-react";
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { unstable_useBlocker as useBlocker, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import CreateApp from "../CreateApp";
 import { ChatTest } from "./FlowChat/ChatTest";
 import useFlowStore from "./flowStore";
 import Notification from "./Notification";
+import { useNodeEvent } from "./useNodeEvent";
+import { useWorkflowVersions } from "./useWorkflowVersions";
+import { useWorkflowLeaveGuard } from "./useWorkflowLeaveGuard";
 
 const APP_HEADER_ACTIONS = [
     'edit',
     'publish',
     'unpublish',
     'manage_permission',
+    'use',
 ]
 
-const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFlow }) => {
+interface WorkflowHeaderProps {
+    flow: WorkFlow & { status?: number; logo?: string; viewUrl?: string };
+    nodes: WorkFlow['nodes'];
+    preFlow: string;
+    onTabChange: (type: string) => void;
+    onPreFlowChange: () => void;
+    onImportFlow: (nodes: WorkFlow['nodes'], edges: WorkFlow['edges'], viewport: WorkFlow['viewport']) => void;
+}
+
+export function WorkflowHeader({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFlow }: WorkflowHeaderProps) {
     const { message } = useToast()
     const { dark } = useContext(darkContext);
     const testRef = useRef(null)
+    const { pending: publishing, runAction: runPublication } = usePendingAction()
     const updateAppModalRef = useRef(null)
     // const { uploadFlow } = useFlowStore()
     const { t, i18n } = useTranslation('flow')
@@ -55,6 +69,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
     const canEdit = flowId ? hasResourceAction(actions, flowId, 'edit') : false;
     const canPublish = flowId ? hasResourceAction(actions, flowId, 'publish') : false;
     const canUnpublish = flowId ? hasResourceAction(actions, flowId, 'unpublish') : false;
+    const canRun = flowId ? hasResourceAction(actions, flowId, 'use') : false;
     /** 与构建列表卡片「权限」盾牌一致：所有者 / 管理者可管理应用成员与权限 */
     const canManage = flowId ? hasResourceAction(actions, flowId, 'manage_permission') : false;
 
@@ -64,6 +79,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
     const addNotification = useFlowStore((state) => state.addNotification);
 
     const handleRunClick = async () => {
+        if (!canRun) return;
         // 记录错误日志
         const errors = await validateNodes()
         if (errors.length) {
@@ -82,6 +98,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
     }
 
     const handleOnlineClick = async () => {
+        if (!canPublish) return;
         const errors = await validateNodes()
         if (errors.length) {
             errors.map(el => addNotification({
@@ -95,7 +112,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
             })
         }
 
-        await captureAndAlertRequestErrorHoc(saveWorkflow(version.id, {
+        const saved = !canEdit || await captureAndAlertRequestErrorHoc(saveWorkflow(version.id, {
             ...flow,
             name: version.name,
             data: {
@@ -104,6 +121,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
                 viewport: flow.viewport
             }
         }))
+        if (!saved) return
         setFlow({ ...flow })
         // api请求
         const res = await captureAndAlertRequestErrorHoc(onlineWorkflowApi({ flow_id: flow.id, version_id: version.id, status: 2 }))
@@ -116,6 +134,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
         }
     }
     const handleOfflineClick = async () => {
+        if (!canUnpublish) return;
         const res = await captureAndAlertRequestErrorHoc(onlineWorkflowApi({ flow_id: flow.id, version_id: version.id, status: 1 }))
         if (res === null) {
             message({
@@ -129,6 +148,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
     }
 
     const handleSaveClick = async () => {
+        if (!canEdit) return false;
 
         if (isOnlineVersionFun()) {
             message({
@@ -212,7 +232,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
     // versions
     const [loading, setLoading] = useState(false)
     const { flow: f, setFlow, setFitView } = useFlowStore()
-    const { versions, version, lastVersionIndexRef, isOnlineVersion, isOnlineVersionFun, changeName, deleteVersion, refrenshVersions, setCurrentVersion } = useVersion(flow)
+    const { versions, version, lastVersionIndexRef, isOnlineVersion, isOnlineVersionFun, changeName, deleteVersion, refrenshVersions } = useWorkflowVersions(flow, canEdit)
     // 切换版本
     const handleChangeVersion = async (versionId) => {
         setLoading(true)
@@ -237,6 +257,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
     }, [saveVersionId])
     // new version
     const handleSaveNewVersion = async () => {
+        if (!canEdit) return;
         // 累加版本 vx ++
         const maxNo = lastVersionIndexRef.current + 1
         const { nodes, edges, viewport } = flow
@@ -276,9 +297,10 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
         returnPage,
         blocker,
         hasChanged
-    } = useBeforeUnload(flow, nodes, preFlow, onPreFlowChange)
+    } = useWorkflowLeaveGuard(flow, nodes, preFlow, onPreFlowChange, canEdit)
     // 离开并保存
     const handleSaveAndClose = async () => {
+        if (!canEdit) return blocker.proceed?.();
         if (isOnlineVersion) {
             handleSaveNewVersion()
             blocker.reset?.()
@@ -315,9 +337,9 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
                                 <PencilLineIcon className="size-4 text-gray-500"></PencilLineIcon>
                             </Button>
                         </h1>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <div className="text-xs text-gray-500 mt-0.5">
                             <Badge variant="gray" className="font-light dark:bg-gray-950 dark:text-gray-400"><ShieldCheck size={14} />{t('currentVersion', { versionName: version?.name })}</Badge>
-                        </p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -339,12 +361,12 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
             {/* Right Section with Options */}
             <div className="header-right flex items-center gap-3">
                 <Notification />
-                <Button variant="outline" size="sm" className={`${!dark && 'bg-[#fff]'} h-8`} disabled={!canEdit} onClick={handleRunClick}>
+                <Button variant="outline" size="sm" className={`${!dark && 'bg-[#fff]'} h-8`} disabled={!canRun} onClick={handleRunClick}>
                     <Play className="size-3.5 mr-1" />
                     {t('run')}
                 </Button>
                 <Button variant="outline" size="sm" className={`${!dark && 'bg-[#fff]'} h-8 px-6`} disabled={!canEdit || saving} onClick={async () => {
-                    if (savingRef.current) return
+                    if (!canEdit || savingRef.current) return
                     savingRef.current = true
                     setSaving(true)
                     try {
@@ -380,6 +402,10 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
                         dropDown={(
                             <div className=" overflow-y-auto max-h-96 max-h">
                                 <RadioGroup value={version.id + ''} onValueChange={(vid) => {
+                                    if (!canEdit) {
+                                        handleChangeVersion(vid)
+                                        return
+                                    }
                                     if (isOnlineVersionFun() && hasChanged) return setModelVersionId(vid)
                                     const { edges, nodes, viewport } = flow
                                     updateVersion(version.id, {
@@ -393,18 +419,18 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
                                         <div key={vers.id} className="group flex items-center gap-4 px-4 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 border-b">
                                             <RadioGroupItem value={vers.id + ''} />
                                             <div className="w-[198px]">
-                                                <TextInput
+                                                {canEdit ? <TextInput
                                                     className="h-[30px]"
                                                     type="hover"
                                                     value={vers.name}
                                                     maxLength={30}
                                                     onSave={val => changeName(vers.id, val || vers.name)}
-                                                ></TextInput>
+                                                ></TextInput> : <span className="text-sm">{vers.name}</span>}
                                                 <p className="text-sm text-muted-foreground mt-2">{vers.update_time.replace('T', ' ').substring(0, 16)}</p>
                                             </div>
                                             {
                                                 // 最后一个 V0 版本和当前选中版本不允许删除
-                                                !(version.id === vers.id)
+                                                canEdit && !(version.id === vers.id)
                                                 && <Button
                                                     className="group-hover:flex hidden"
                                                     type="button"
@@ -422,18 +448,18 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
                 }
                 {isOnlineVersion
                     ? (canUnpublish ? (
-                        <Button size="sm" className="h-8 px-6" onClick={handleOfflineClick}>
+                        <Button size="sm" className="h-8 px-6" disabled={publishing} aria-busy={publishing} onClick={() => runPublication(handleOfflineClick)}>
                             {t('takeOffline')}
                         </Button>
                     ) : null)
                     : (canPublish ? (
-                        <Button size="sm" className="h-8 px-6" onClick={handleOnlineClick}>
+                        <Button size="sm" className="h-8 px-6" disabled={publishing} aria-busy={publishing} onClick={() => runPublication(handleOnlineClick)}>
                             {t('goOnline')}
                         </Button>
                     ) : null)}
-                <Popover open={open && canEdit} onOpenChange={(next) => canEdit && setOpen(next)}>
+                <Popover open={open} onOpenChange={setOpen}>
                     <PopoverTrigger asChild >
-                        <Button size="icon" variant="outline" disabled={!canEdit} className={`${!dark && 'bg-[#fff]'} size-8`}>
+                        <Button size="icon" variant="outline" aria-label={tbs('more')} className={`${!dark && 'bg-[#fff]'} size-8`}>
                             <EllipsisVertical size={16} />
                         </Button>
                     </PopoverTrigger>
@@ -462,6 +488,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
             <ChatTest ref={testRef} />
             {/* 修改应用弹窗 flow&assistant */}
             <CreateApp ref={updateAppModalRef} loca={loca} onSave={(base) => {
+                if (!canEdit) return;
                 captureAndAlertRequestErrorHoc(onlineWorkflow({
                     ...f,
                     ...base,
@@ -535,327 +562,3 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
         </header >
     );
 };
-
-/** 收集节点事件
- * return validate<func>
- * */
-const useNodeEvent = (flow) => {
-    const { t } = useTranslation('flow');
-    // 收集节点校验事件(表单 变量)
-    const nodeValidateEntitiesRef = useRef({});
-    useEffect(() => {
-        const setNodeEvent = (e) => {
-            const { action, id } = e.detail;
-            if (action === 'update') {
-                nodeValidateEntitiesRef.current[id] = e.detail.validate;
-            } else {
-                delete nodeValidateEntitiesRef.current[id];
-            }
-        };
-        window.addEventListener('node_event', setNodeEvent);
-        return () => {
-            window.removeEventListener('node_event', setNodeEvent);
-        };
-    }, []);
-
-    return async () => {
-        let errors = [];
-        // 使用 map 来收集所有的 Promise
-        const promises = Object.keys(nodeValidateEntitiesRef.current).map(async (key) => {
-            const result = await nodeValidateEntitiesRef.current[key]();  // 等待验证结果
-
-            // 如果有错误，合并到 errors 数组中
-            if (result && result.length > 0) {
-                errors = [...errors, ...result];
-            }
-        });
-        await Promise.all(promises);
-
-        // event func
-        const sendEvent = (ids) => {
-            const event = new CustomEvent('nodeErrorBorderEvent', {
-                detail: {
-                    nodeIds: ids
-                }
-            });
-            window.dispatchEvent(event);
-        };
-
-        if (errors.length) return errors;
-        if (!flow.edges.length) {
-            sendEvent([flow.nodes.find(node => node.data.type === 'start').id]);
-            return [t('missingEndNode')];
-        }
-
-        /**
-         * branch flows
-         * 梳理每条分支线 验证连线逻辑
-         */
-        const branchLines: { branch: string, nodeIds: { branch: string, nodeId: string }[], end: boolean }[] = [];
-        const nodeMap = {};
-        const treeNodeIdSet = new Set();
-        const startEdge = flow.edges.find(node => node.source.indexOf('start') === 0);
-        if (!startEdge) return [t('pleaseLinkStartNode')];
-        const startNodeId = startEdge.source;
-        const findEdgesByNodeId = (id) => {
-            return flow.edges.filter(node => node.source === id);
-        };
-        const findOutType = (nodeId) => {
-            if (!nodeId.startsWith('output')) return '';
-            return flow.nodes.find(node => node.id === nodeId)?.data.group_params[0].params[1].value.type || '';
-        };
-
-        const traverseTree = (nodeId, branchId, nodeIds) => {
-            const edges = findEdgesByNodeId(nodeId);
-            edges.forEach((edge, index) => {
-                const [source, target] = [edge.source.split('_')[0], edge.target.split('_')[0]];
-                const _branchId = `${branchId}_${index}`;
-                const _nodeIds = [...nodeIds, { branch: _branchId, nodeId: edge.target, type: findOutType(edge.target) }];
-                treeNodeIdSet.add(edge.target);
-
-                if (target === 'end') {
-                    // stop when loop or end 
-                    branchLines.push({ branch: _branchId, nodeIds: _nodeIds, end: true });
-                } else if (nodeMap[edge.target]) {
-                    // stop when loop or end 
-                    branchLines.push({ branch: branchId, nodeIds, end: true });
-                } else {
-                    nodeMap[edge.target] = true;
-                    traverseTree(edge.target, _branchId, _nodeIds);
-                }
-            });
-
-            if (edges.length === 0) {
-                branchLines.push({ branch: branchId, nodeIds, end: false });
-            }
-        };
-
-        traverseTree(startNodeId, '0', [{ branch: '0', nodeId: startNodeId, type: '' }]);
-
-        // 节点连线完整校验
-        if (treeNodeIdSet.size !== flow.nodes.filter(node => node.type === 'flowNode').length - 1) {
-            const ids = flow.nodes.reduce((res, node) => {
-                if (node.type === 'flowNode' && node.data.type !== 'start' && !treeNodeIdSet.has(node.id))
-                    res.push(node.id)
-                return res
-            }, [])
-            sendEvent(ids);
-            return [t('unconnectedNodes')];
-        }
-
-        // 并行校验
-        // input节点s & 分支节点s
-        const nodeLMap = {};
-        const [inputNodeLs, outputNodeLs, branchNodeLs] = branchLines.reduce(
-            ([inputNodeLs, outputNodeLs, branchNodeLs], line) => {
-                line.nodeIds.forEach(node => {
-                    if (node.nodeId.startsWith('input')) {
-                        const inputNode = flow.nodes.find(_node => _node.id === node.nodeId && _node.data.tab.value === 'dialog_input');
-                        // It is an input & ouput node and is different from the branch path in ids;
-                        if (inputNode && !inputNodeLs.some(el => el.branch === inputNode.branch)) {
-                            !nodeLMap[node.branch] && inputNodeLs.push(node);
-                        }
-                    } else if (node.nodeId.startsWith('output') && node.type === 'input') {
-                        !nodeLMap[node.branch] && inputNodeLs.push(node);
-                    } else if ((node.nodeId.startsWith('output') && node.type === 'choose') || node.nodeId.startsWith('condition')) {
-                        !nodeLMap[node.branch] && branchNodeLs.push(node);
-                    }
-                    nodeLMap[node.branch] = true;
-                });
-                return [inputNodeLs, outputNodeLs, branchNodeLs];
-            },
-            [[], [], []]
-        );
-
-        const result = findParallelNodes(inputNodeLs, branchNodeLs);
-        if (result.length) {
-            sendEvent([...result, []]);
-            return [t('parallelInputOutputNodes')];
-        }
-        // if (!result.length) {
-        //     result = findParallelNodes(outputNodeLs, branchNodeLs);
-        //     if (result.length) {
-        //         sendEvent([...result, []]);
-        //         return [t('parallelOutputNodes')];
-        //     }
-        // }
-        console.log('inputParallelNids, outputParallelNids :>> ', result);
-
-        // 开始到结束流程是否完整
-        const errorLine = branchLines.find(line => !line.end);
-        if (errorLine) {
-            sendEvent([errorLine.nodeIds[errorLine.nodeIds.length - 1].nodeId]);
-            return [t('missingEndNode')];
-        }
-
-        // 找出分支节点
-        const conditionOutputs = flow.nodes.reduce((res, node) => {
-            if (node.data.type === "condition") {
-                node.data.group_params[0].params[0].value.forEach(item => {
-                    res.push({ name: node.data.name, nodeId: node.id, output: item.id });
-                });
-                res.push({ name: node.data.name, nodeId: node.id, output: "right_handle" });
-            }
-            return res;
-        }, []);
-        // 找出右侧没有链接的condtion节点
-        const incompleteNode = conditionOutputs.find(output => {
-            return !flow.edges.some(edge =>
-                edge.source === output.nodeId && edge.sourceHandle === output.output
-            );
-        });
-        if (incompleteNode) {
-            sendEvent(incompleteNode.nodeId);
-            return [t('unconnectedConditionNode', { nodeName: incompleteNode.name })];
-        }
-
-        sendEvent([]); // reduction
-        return errors;
-    };
-};
-
-
-// 版本管理
-const useVersion = (flow) => {
-    const { t } = useTranslation()
-    const [versions, setVersions] = useState<FlowVersionItem[]>([])
-    const { version, setVersion } = useContext(TabsContext)
-    // 上线版本的版本 id
-    const [onlineVid, setOnlineVid] = useState(0);
-    const updateOnlineVid = (vid: number) => {
-        setOnlineVid(flow.status === 2 ? vid : 0);
-    }
-    const lastVersionIndexRef = useRef(0)
-
-    const refrenshVersions = () => {
-        return getWorkFlowVersions(flow.id).then(({ data, total }) => {
-            setVersions(data)
-            lastVersionIndexRef.current = total - 1
-            const currentvId = window.flow_version
-            delete window.flow_version
-            const currentV = data.find(el => currentvId ? el.id === currentvId : el.is_current === 1)
-            setVersion(currentV)
-            // 记录上线的版本
-            const onlineVersion = data.find(el => el.is_current === 1)
-            updateOnlineVid(onlineVersion?.id)
-        })
-    }
-
-    useEffect(() => {
-        refrenshVersions()
-    }, [])
-
-    // 修改名字
-    const handleChangName = (id, name) => {
-        captureAndAlertRequestErrorHoc(updateVersion(id, { name, description: '', data: null }))
-        // 乐观更新
-        setVersions(versions.map(version => {
-            if (version.id === id) {
-                version.name = name;
-            }
-            return version;
-        }))
-    }
-
-    const handleDeleteVersion = (version, index) => {
-        bsConfirm({
-            title: t('prompt'),
-            desc: `${t('skills.deleteOrNot')} ${version.name} ${t('skills.version')}?`,
-            onOk: (next) => {
-                captureAndAlertRequestErrorHoc(deleteVersion(version.id)).then(res => {
-                    if (res === null) {
-                        // 乐观更新
-                        setVersions(versions.filter((_, i) => i !== index))
-                    }
-                })
-                next()
-            }
-        })
-    }
-
-    return {
-        versions,
-        version,
-        isOnlineVersion: version?.id === onlineVid,
-        isOnlineVersionFun: () => version?.id === onlineVid,
-        lastVersionIndexRef,
-        setCurrentVersion(versionId) {
-            const currentV = versions.find(el => el.id === versionId)
-            setVersion(currentV)
-            return currentV
-        },
-        refrenshVersions,
-        deleteVersion: handleDeleteVersion,
-        changeName: handleChangName,
-    }
-}
-
-
-// 离开页面保存提示
-const useBeforeUnload = (flow, nodes, preFlow, onPreFlowChange) => {
-    const { t } = useTranslation()
-    const navigate = useNavigate()
-    // 离开提示保存
-    useEffect(() => {
-        const fun = (e) => {
-            // 系统 重新加载 提示
-            const confirmationMessage = `${t('flow.unsavedChangesConfirmation')}`;
-            (e || window.event).returnValue = confirmationMessage; // Compatible with different browsers
-            return confirmationMessage;
-        }
-        window.addEventListener('beforeunload', fun);
-        return () => { window.removeEventListener('beforeunload', fun) }
-    }, [])
-
-    // 检查流程变化（忽略节点位置，只对比数据和边）
-    const hasChanged = useMemo(() => {
-        // 无新数据时视为未修改
-        if (!flow) return false;
-
-        try {
-            const oldFlowData = JSON.parse(preFlow);
-            // 旧数据不存在时视为有修改
-            if (!oldFlowData) return true;
-
-            // 提取新旧节点数据（忽略位置信息）
-            const { edges, nodes } = flow
-            const { edges: oldEdges, nodes: oldNodes } = oldFlowData
-
-            // 比较边和节点数据
-            return !(isEqual(edges, oldEdges) && nodes.every((node, i) =>
-                isEqual(node.data, oldNodes[i].data)));
-        } catch {
-            return true; // 解析失败视为有修改
-        }
-    }, [preFlow, nodes, flow]);
-
-    /**
-     * 处理页面返回逻辑：
-     * 1. 触发父组件更新为原始流程数据(nodes)
-     * 2. 标记本次变更为返回操作(isReturningRef)
-     * 3. 在节点更新后执行历史回退(回退后,根据hasChanged触发blocker)
-     */
-    const isReturningRef = useRef(false);
-    const handleReturn = () => {
-        onPreFlowChange();
-        isReturningRef.current = true;
-    };
-
-    // 当节点更新且为返回操作时，执行导航
-    useEffect(() => {
-        if (!isReturningRef.current) return;
-
-        isReturningRef.current = false;
-        window.history.length > 1
-            ? window.history.back()
-            : navigate('/build/apps');
-    }, [nodes]);
-
-    return {
-        returnPage: handleReturn,
-        blocker: useBlocker(hasChanged),
-        hasChanged
-    }
-}
-
-export default Header;

@@ -8,7 +8,11 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import AutoPromptDialog from "./AutoPromptDialog";
 
-export default function Prompt({ canEdit = false }) {
+interface AssistantPromptProps {
+    canEdit?: boolean;
+}
+
+export function AssistantPrompt({ canEdit = false }: AssistantPromptProps) {
 
     const { t } = useTranslation()
 
@@ -39,7 +43,6 @@ export default function Prompt({ canEdit = false }) {
             className="h-full border-none bg-transparent scrollbar-hide focus-visible:ring-0 resize-none text-sm text-muted-foreground"
             value={assistantState.prompt}
             placeholder={t('prompt')}
-            disabled={!canEdit}
             onInput={(e => dispatchAssistant('setPrompt', { prompt: e.target.value }))}
         ></Textarea>
     </div>

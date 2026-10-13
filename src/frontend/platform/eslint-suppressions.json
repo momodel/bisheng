@@ -1481,12 +1481,6 @@
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 4
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    },
-    "react-hooks/rules-of-hooks": {
-      "count": 16
     }
   },
   "src/pages/BuildPage/assistant/CreateAssistant.tsx": {
@@ -1550,16 +1544,13 @@
   },
   "src/pages/BuildPage/assistant/editAssistant/index.tsx": {
     "@typescript-eslint/no-unused-expressions": {
-      "count": 4
+      "count": 3
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     },
     "react-hooks/exhaustive-deps": {
-      "count": 3
-    },
-    "react-hooks/rules-of-hooks": {
-      "count": 15
+      "count": 1
     }
   },
   "src/pages/BuildPage/bench/AppCenter.tsx": {
@@ -2151,16 +2142,13 @@
   },
   "src/pages/BuildPage/flow/Header.tsx": {
     "@typescript-eslint/no-unused-expressions": {
-      "count": 8
+      "count": 4
     },
     "@typescript-eslint/no-unused-vars": {
-      "count": 5
-    },
-    "no-console": {
-      "count": 1
+      "count": 2
     },
     "react-hooks/exhaustive-deps": {
-      "count": 5
+      "count": 1
     }
   },
   "src/pages/BuildPage/flow/NoteNode.tsx": {
@@ -2172,12 +2160,6 @@
     }
   },
   "src/pages/BuildPage/flow/Panne.tsx": {
-    "no-console": {
-      "count": 2
-    },
-    "no-restricted-syntax": {
-      "count": 2
-    },
     "react-hooks/exhaustive-deps": {
       "count": 5
     }
@@ -2204,11 +2186,6 @@
   },
   "src/pages/BuildPage/flow/flowStore.ts": {
     "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/pages/BuildPage/flow/index.tsx": {
-    "react-hooks/exhaustive-deps": {
       "count": 1
     }
   },

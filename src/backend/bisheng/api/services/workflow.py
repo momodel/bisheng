@@ -8,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from langchain_classic.memory import ConversationBufferWindowMemory
 from loguru import logger
 
+from bisheng.api.services.application_publication import serialized_publication, sync_application_publication
 from bisheng.api.v1.schema.workflow import (
     WorkflowEvent,
     WorkflowEventType,
@@ -19,7 +20,7 @@ from bisheng.api.v1.schemas import ChatResponse
 from bisheng.common.chat.utils import SourceType
 from bisheng.common.constants.enums.telemetry import BaseTelemetryTypeEnum
 from bisheng.common.dependencies.user_deps import UserPayload
-from bisheng.common.errcode.flow import WorkFlowInitError
+from bisheng.common.errcode.flow import WorkFlowInitError, WorkFlowOnlineEditError
 from bisheng.common.errcode.http_error import NotFoundError
 from bisheng.common.errcode.permission import PermissionEnumerationIncompleteError
 from bisheng.common.services import telemetry_service
@@ -923,12 +924,14 @@ class WorkFlowService(BaseService):
         return res
 
     @classmethod
-    async def update_flow_status(cls, login_user: UserPayload, flow_id: str, version_id: int, status: int):
+    @serialized_publication("workflow", "flow_id")
+    async def update_flow_status(cls, login_user: UserPayload, flow_id: str, version_id: int | None, status: int):
         """
         Modify workflow status, Also modify the current version of the workflow
         """
+        status = FlowStatus(status).value
         db_flow = await FlowDao.aget_flow_by_id(flow_id)
-        if not db_flow:
+        if not db_flow or db_flow.flow_type != FlowType.WORKFLOW.value:
             raise NotFoundError()
         required_action = "publish" if status == FlowStatus.ONLINE.value else "unpublish"
         await require_business_action(
@@ -938,8 +941,14 @@ class WorkFlowService(BaseService):
             action=required_action,
         )
 
-        version_info = await FlowVersionDao.aget_version_by_id(version_id)
-        if not version_info or version_info.flow_id != flow_id:
+        version_info = (
+            await FlowVersionDao.aget_version_by_id(version_id)
+            if version_id is not None
+            else FlowVersionDao.get_version_by_flow(flow_id)
+        )
+        if (version_info and version_info.flow_id != flow_id) or (
+            status == FlowStatus.ONLINE.value and not version_info
+        ):
             raise NotFoundError()
         if status == FlowStatus.ONLINE.value:
             # workflowInitialization check for
@@ -948,6 +957,14 @@ class WorkFlowService(BaseService):
             except Exception as e:
                 raise WorkFlowInitError(msg=str(e))
 
+        await sync_application_publication(
+            login_user,
+            resource_type="workflow",
+            resource_id=flow_id,
+            tenant_id=db_flow.tenant_id,
+            online=status == FlowStatus.ONLINE.value,
+        )
+        if status == FlowStatus.ONLINE.value:
             await FlowVersionDao.change_current_version(flow_id, version_info)
         db_flow.status = status
         await FlowDao.aupdate_flow(db_flow)
@@ -955,6 +972,43 @@ class WorkFlowService(BaseService):
             user_id=login_user.user_id, event_type=BaseTelemetryTypeEnum.EDIT_APPLICATION, trace_id=trace_id_var.get()
         )
         return
+
+    @classmethod
+    async def update_metadata(cls, request, login_user: UserPayload, flow_id: str, flow):
+        from bisheng.api.services.flow import FlowService
+
+        db_flow = await FlowDao.aget_flow_by_id(flow_id)
+        if not db_flow or db_flow.flow_type != FlowType.WORKFLOW.value:
+            raise NotFoundError()
+        values = flow.model_dump(exclude_unset=True)
+        status = values.pop("status", None)
+        changes = {
+            key: value
+            for key, value in values.items()
+            if key not in {"data", "create_time", "update_time"}
+            and not (key == "logo" and not value)
+            and getattr(db_flow, key) != value
+        }
+        if changes:
+            await require_business_action(login_user, resource_type="workflow", resource_id=flow_id, action="edit")
+            if db_flow.status == FlowStatus.ONLINE.value and status != FlowStatus.OFFLINE.value:
+                raise WorkFlowOnlineEditError()
+        if status is not None:
+            await cls.update_flow_status(login_user, flow_id, None, status)
+            db_flow = await FlowDao.aget_flow_by_id(flow_id)
+        if not changes:
+            await require_business_action(login_user, resource_type="workflow", resource_id=flow_id, action="visible")
+            return db_flow
+        if db_flow.status == FlowStatus.ONLINE.value:
+            raise WorkFlowOnlineEditError()
+        for key, value in changes.items():
+            setattr(db_flow, key, value)
+        db_flow = await FlowDao.aupdate_flow(db_flow)
+        await telemetry_service.log_event(
+            user_id=login_user.user_id, event_type=BaseTelemetryTypeEnum.EDIT_APPLICATION, trace_id=trace_id_var.get()
+        )
+        await FlowService.update_flow_hook(request, login_user, db_flow)
+        return db_flow
 
     @classmethod
     def convert_chat_response_to_workflow_event(cls, chat_response: ChatResponse) -> WorkflowEvent:

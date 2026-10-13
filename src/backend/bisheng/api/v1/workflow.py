@@ -12,17 +12,14 @@ from bisheng.api.services.workflow import WorkFlowService
 from bisheng.api.v1.chat import chat_manager
 from bisheng.api.v1.schemas import FlowVersionCreate, resp_200
 from bisheng.common.chat.types import WorkType
-from bisheng.common.constants.enums.telemetry import BaseTelemetryTypeEnum
 from bisheng.common.dependencies.user_deps import UserPayload
-from bisheng.common.errcode.flow import AppWriteAuthError, WorkflowNameExistsError, WorkFlowOnlineEditError
+from bisheng.common.errcode.flow import AppWriteAuthError, WorkflowNameExistsError
 from bisheng.common.errcode.http_error import NotFoundError, ServerError, UnAuthorizedError
-from bisheng.common.services import telemetry_service
 from bisheng.common.services.config_service import settings as bisheng_settings
 from bisheng.core.database import get_sync_db_session
-from bisheng.core.logger import trace_id_var
 from bisheng.core.storage.minio.minio_manager import get_minio_storage
 from bisheng.database.models.assistant import AssistantDao
-from bisheng.database.models.flow import Flow, FlowCreate, FlowDao, FlowRead, FlowStatus, FlowType, FlowUpdate
+from bisheng.database.models.flow import Flow, FlowCreate, FlowDao, FlowRead, FlowType, FlowUpdate
 from bisheng.database.models.flow_version import FlowVersionDao
 from bisheng.permission.application.business_authorization import (
     check_business_action,
@@ -71,11 +68,7 @@ async def check_app_write_auth(
         raise NotFoundError.http_exception()
     if await check_business_action(
         login_user,
-        resource_type=(
-            "assistant"
-            if flow_type == FlowType.ASSISTANT.value
-            else "workflow"
-        ),
+        resource_type=("assistant" if flow_type == FlowType.ASSISTANT.value else "workflow"),
         resource_id=flow_id,
         action="edit",
     ):
@@ -408,38 +401,8 @@ async def read_flow(
 async def update_flow(
     *, request: Request, flow_id: str, flow: FlowUpdate, login_user: UserPayload = Depends(UserPayload.get_login_user)
 ):
-    """online offline"""
-    db_flow = await FlowDao.aget_flow_by_id(flow_id)
-    if not db_flow:
-        raise NotFoundError()
-
-    if not await check_business_action(
-        login_user,
-        resource_type="workflow",
-        resource_id=flow_id,
-        action="edit",
-    ):
-        return UnAuthorizedError.return_resp()
-
-    flow_data = flow.model_dump(exclude_unset=True)
-
-    if db_flow.status == FlowStatus.ONLINE.value and (
-        "status" not in flow_data or flow_data["status"] != FlowStatus.OFFLINE.value
-    ):
-        raise WorkFlowOnlineEditError.http_exception()
-
-    for key, value in flow_data.items():
-        if key in ["data", "create_time", "update_time"]:
-            continue
-        if key == "logo" and not value:
-            continue
-        setattr(db_flow, key, value)
-    db_flow = await FlowDao.aupdate_flow(db_flow)
-    await telemetry_service.log_event(
-        user_id=login_user.user_id, event_type=BaseTelemetryTypeEnum.EDIT_APPLICATION, trace_id=trace_id_var.get()
-    )
-    await FlowService.update_flow_hook(request, login_user, db_flow)
-    return resp_200(db_flow)
+    """Update metadata; legacy status requests share the publication service."""
+    return resp_200(await WorkFlowService.update_metadata(request, login_user, flow_id, flow))
 
 
 @router.patch("/status")
@@ -447,8 +410,8 @@ async def update_flow_status(
     request: Request,
     login_user: UserPayload = Depends(UserPayload.get_login_user),
     flow_id: str = Body(..., description="SkillID"),
-    version_id: int = Body(..., description="VersionID"),
-    status: int = Body(..., description="Status"),
+    version_id: int | None = Body(default=None, description="VersionID"),
+    status: int = Body(..., ge=1, le=2, description="Publication status: 1 offline, 2 online"),
 ):
     await WorkFlowService.update_flow_status(login_user, flow_id, version_id, status)
     return resp_200()

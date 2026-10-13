@@ -7,6 +7,7 @@ AC-143, AC-164, AC-166, AC-167, AC-170
 from __future__ import annotations
 
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -285,6 +286,38 @@ def _service(plan: ProjectionPlan):
         stage_batch_size=1,
     )
     return service, repository, marker, scope, fga, finalizer, events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interrupted_status", [None, "PREPARED", "STAGING", "COMMITTED"])
+async def test_source_only_grant_operation_is_durable_and_recoverable(interrupted_status) -> None:
+    plan = replace(_plan(), deltas=())
+    service, repository, _marker, scope, fga, finalizer, _ = _service(plan)
+    fga.read_present = AsyncMock(side_effect=AssertionError("source-only operations must not read OpenFGA"))
+    fga.write_atomic = AsyncMock(side_effect=AssertionError("source-only operations must not write OpenFGA"))
+    if interrupted_status is not None:
+        operation = await service.prepare(plan)
+        operation.status = interrupted_status
+        outcome = await service.reconcile_operation(int(operation.id))
+    else:
+        outcome = await service.execute(plan)
+    assert outcome.status == "FINALIZED"
+    assert repository.tuples == []
+    assert fga.calls == []
+    assert finalizer.calls == 1
+    assert not scope.fenced
+    repeated = await service.execute(plan)
+    assert repeated.idempotent
+    assert finalizer.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation_type", ["RESOURCE_MOVE", "MODEL_PUBLISH"])
+async def test_empty_projection_is_not_allowed_for_other_operation_types(operation_type) -> None:
+    plan = replace(_plan(), operation_type=operation_type, deltas=())
+    service, *_ = _service(plan)
+    with pytest.raises(ValueError, match="tuple deltas"):
+        await service.execute(plan)
 
 
 @pytest.mark.asyncio

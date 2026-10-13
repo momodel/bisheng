@@ -6,6 +6,7 @@ import { Button } from "@/components/bs-ui/button";
 import { Dialog, DialogTrigger } from "@/components/bs-ui/dialog";
 import { useAssistantStore } from "@/store/assistantStore";
 import { OnlineState } from "@/types/flow";
+import { usePendingAction } from "@/hooks/usePendingAction";
 import { ChevronLeft, Shield, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,6 +23,7 @@ const APP_HEADER_ACTIONS = [
 export default function Header({ loca, onSave, onLine, onTabChange, canEdit: canEditProp }) {
     const { t } = useTranslation()
     const navigate = useNavigate()
+    const { pending: publishing, runAction: runPublication } = usePendingAction()
 
     const { assistantState, dispatchAssistant } = useAssistantStore()
     const assistantId = assistantState?.id ? String(assistantState.id) : ''
@@ -99,7 +101,9 @@ export default function Header({ loca, onSave, onLine, onTabChange, canEdit: can
                 <Button
                     type="submit"
                     className="px-10"
-                    onClick={() => onLine(assistantState.status === OnlineState.OffLine)}
+                    disabled={publishing}
+                    aria-busy={publishing}
+                    onClick={() => runPublication(() => onLine(assistantState.status === OnlineState.OffLine))}
                 >
                     {assistantState.status === OnlineState.OnLine ? t('build.offline') : t('build.online')}
                 </Button>

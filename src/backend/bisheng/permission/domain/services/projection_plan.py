@@ -114,7 +114,13 @@ def normalize_projection_plan(plan: ProjectionPlan) -> ProjectionPlan:
         raise ValueError("projection idempotency_key must not be empty")
     if plan.change_item_count < 0 or plan.change_item_count > MAX_CHANGE_ITEMS:
         raise PermissionMutationTooLargeError(msg=f"Projection accepts at most {MAX_CHANGE_ITEMS} change items")
-    if not plan.deltas:
+    source_only = (
+        not plan.deltas
+        and plan.operation_type == "GRANT_MUTATION"
+        and plan.scope_type == "resource"
+        and plan.change_item_count > 0
+    )
+    if not plan.deltas and not source_only:
         raise ValueError("projection plan must contain tuple deltas")
 
     by_phase_key: dict[
@@ -156,7 +162,7 @@ def normalize_projection_plan(plan: ProjectionPlan) -> ProjectionPlan:
     commit_count = sum(delta.phase == "COMMIT" for delta in deltas)
     if commit_count > MAX_ATOMIC_TUPLES:
         raise PermissionMutationTooLargeError(msg=f"Projection atomic commit exceeds {MAX_ATOMIC_TUPLES} tuples")
-    if commit_count == 0:
+    if commit_count == 0 and not source_only:
         raise ValueError("projection plan requires an atomic COMMIT phase")
     return replace(plan, deltas=deltas)
 

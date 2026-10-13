@@ -11,6 +11,7 @@ from loguru import logger
 from bisheng.common.errcode.permission import (
     AuthorizationModelMismatchError,
     InvalidPermissionModeError,
+    PermissionDeniedError,
     PermissionInvalidResourceError,
     PermissionPublishNotReadyError,
     PermissionVersionConflictError,
@@ -614,6 +615,7 @@ class F048PermissionRuntime:
         *,
         actor: PermissionActor,
         target: VerifiedPermissionTarget,
+        system_authorized: bool = False,
     ) -> GrantMutationContext:
         catalog = await self._runtime_catalog()
         mode = await self._require_current_target(target)
@@ -623,7 +625,7 @@ class F048PermissionRuntime:
             models=models,
         )
         visible_sources = await self._state.load_visible_sources(target=target)
-        system_authorized = self._system_authorized(actor, target)
+        system_authorized = system_authorized or self._system_authorized(actor, target)
         capabilities = () if system_authorized else await self._grant_capabilities(actor, target)
         return GrantMutationContext(
             target=target,
@@ -666,6 +668,26 @@ class F048PermissionRuntime:
             changes=changes,
             expected_resource_version=expected_resource_version,
             expected_catalog_release_id=expected_catalog_release_id,
+            idempotency_key=idempotency_key,
+        )
+
+    async def sync_published_viewers(self, *, actor, target, group_ids, online, idempotency_key):
+        from bisheng.permission.application.published_viewers import published_viewer_changes
+
+        if target.resource_type not in {"workflow", "assistant"}:
+            raise PermissionInvalidResourceError()
+        if not await self.check_action(actor, target, "publish" if online else "unpublish"):
+            raise PermissionDeniedError()
+        context = await self.build_grant_context(actor=actor, target=target, system_authorized=True)
+        changes = published_viewer_changes(context, group_ids=group_ids, online=online)
+        if not changes:
+            return None
+        changes = await self._state.restore_inactive_sources(target=target, changes=changes)
+        return await self._grants.mutate(
+            context,
+            changes=changes,
+            expected_resource_version=target.resource_version,
+            expected_catalog_release_id=context.current_catalog_release_id,
             idempotency_key=idempotency_key,
         )
 

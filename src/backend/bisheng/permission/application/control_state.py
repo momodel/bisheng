@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy import update
 from sqlmodel import col, select
@@ -35,6 +35,7 @@ from bisheng.permission.domain.schemas import (
     VisibleSourceProjectionDTO,
 )
 from bisheng.permission.domain.services.grant_service import (
+    CanonicalGrantChange,
     GrantMutationContext,
 )
 from bisheng.permission.domain.services.grant_source_service import (
@@ -348,6 +349,48 @@ class SqlPermissionControlState:
                 )
             )
         return tuple(result)
+
+    async def restore_inactive_sources(
+        self,
+        *,
+        target: VerifiedPermissionTarget,
+        changes: tuple[CanonicalGrantChange, ...],
+    ) -> tuple[CanonicalGrantChange, ...]:
+        """Reuse historical identities with a new version before compiling a plan."""
+        fingerprints = {
+            change.source.source_fingerprint
+            for change in changes
+            if change.operation == "ADD" and change.source is not None
+        }
+        if not fingerprints:
+            return changes
+        async with get_async_db_session() as session:
+            rows = (
+                await session.execute(
+                    select(PermissionGrantAssignee, PermissionGrant.model_key)
+                    .join(PermissionGrant, PermissionGrant.id == PermissionGrantAssignee.grant_id)
+                    .where(
+                        PermissionGrant.tenant_id == target.tenant_id,
+                        PermissionGrant.resource_type == target.resource_type,
+                        PermissionGrant.resource_id == target.resource_id,
+                        PermissionGrantAssignee.tenant_id == target.tenant_id,
+                        PermissionGrantAssignee.state == "INACTIVE",
+                        col(PermissionGrantAssignee.source_fingerprint).in_(fingerprints),
+                    )
+                )
+            ).all()
+        historical = {(model_key, row.source_fingerprint): row for row, model_key in rows}
+        by_id = {row.id: row for row, _ in rows}
+        restored = []
+        for change in changes:
+            source = change.source
+            row = historical.get((change.model_key, source.source_fingerprint)) if source is not None else None
+            if row is None and source is not None:
+                row = by_id.get(source.source_id)
+            if change.operation == "ADD" and source is not None and row is not None:
+                change = replace(change, source=replace(source, source_id=int(row.id), version=row.version + 1))
+            restored.append(change)
+        return tuple(restored)
 
     async def load_visible_sources(
         self,
@@ -1226,26 +1269,34 @@ class SqlPermissionControlState:
         operation_id: int,
     ) -> None:
         desired = (*visibility.active_sources, *visibility.retired_sources)
-        for source in desired:
-            row = (
+        if not desired:
+            return
+        fingerprints = tuple(sorted({source.contribution_fingerprint for source in desired}))
+        resource_types = tuple(sorted({source.resource_type for source in desired}))
+        resource_ids = tuple(sorted({source.resource_id for source in desired}))
+        by_fingerprint = {}
+        for offset in range(0, len(fingerprints), 500):
+            rows = (
                 (
                     await session.execute(
                         select(PermissionVisibleSourceProjection)
                         .where(
                             PermissionVisibleSourceProjection.tenant_id == tenant_id,
-                            PermissionVisibleSourceProjection.resource_type == source.resource_type,
-                            PermissionVisibleSourceProjection.resource_id == source.resource_id,
-                            PermissionVisibleSourceProjection.visibility_class == source.visibility_class,
-                            PermissionVisibleSourceProjection.projected_subject == source.projected_subject,
-                            PermissionVisibleSourceProjection.contribution_fingerprint
-                            == source.contribution_fingerprint,
+                            col(PermissionVisibleSourceProjection.resource_type).in_(resource_types),
+                            col(PermissionVisibleSourceProjection.resource_id).in_(resource_ids),
+                            col(PermissionVisibleSourceProjection.contribution_fingerprint).in_(
+                                fingerprints[offset : offset + 500]
+                            ),
                         )
                         .with_for_update()
                     )
                 )
                 .scalars()
-                .first()
+                .all()
             )
+            by_fingerprint.update((row.contribution_fingerprint, row) for row in rows)
+        for source in desired:
+            row = by_fingerprint.get(source.contribution_fingerprint)
             if row is None:
                 row = PermissionVisibleSourceProjection(
                     tenant_id=tenant_id,
@@ -1457,6 +1508,10 @@ class SqlPermissionControlState:
             )
             if signature != expected:
                 raise PermissionVersionConflictError(msg="Permission source fingerprint collision")
+            expected_version = row.version + (1 if row.state == "INACTIVE" else 0)
+            if source.version != expected_version:
+                raise PermissionVersionConflictError(msg="Permission source version changed before prepare")
+            row.version = source.version
             row.state = state
         return row
 

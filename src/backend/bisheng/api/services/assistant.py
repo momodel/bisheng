@@ -43,6 +43,7 @@ from bisheng.tool.domain.models.gpts_tools import GptsTools, GptsToolsDao
 from bisheng.user.domain.models.user import UserDao
 from bisheng.utils import get_request_ip
 
+from .application_publication import serialized_publication, sync_application_publication
 from .f048_application_permission import ApplicationPermissionRecord
 
 if TYPE_CHECKING:
@@ -579,8 +580,10 @@ class AssistantService(BaseService, AssistantUtils):
         return True
 
     @classmethod
+    @serialized_publication("assistant", "assistant_id")
     async def update_status(cls, request: Request, login_user: UserPayload, assistant_id: str, status: int) -> bool:
         """Update Assistant Status"""
+        status = AssistantStatus(status).value
         assistant = AssistantDao.get_one_assistant(assistant_id)
         if not assistant:
             raise AssistantNotExistsError()
@@ -592,7 +595,7 @@ class AssistantService(BaseService, AssistantUtils):
             action=required_action,
         )
         # Equal status without modification
-        if assistant.status == status:
+        if assistant.status == status == AssistantStatus.ONLINE.value:
             return True
 
         # Try to initializeagent, go online if initialization is successful, otherwise not go online
@@ -603,6 +606,13 @@ class AssistantService(BaseService, AssistantUtils):
             except Exception as e:
                 logger.exception("online agent init failed")
                 raise AssistantInitError(exception=e, msg=f"Assistant onboarding failed: {e}") from e
+        await sync_application_publication(
+            login_user,
+            resource_type="assistant",
+            resource_id=assistant.id,
+            tenant_id=assistant.tenant_id,
+            online=status == AssistantStatus.ONLINE.value,
+        )
         assistant.status = status
         AssistantDao.update_assistant(assistant)
         await telemetry_service.log_event(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
@@ -22,10 +23,12 @@ from bisheng.core.context.tenant import (
     current_tenant_id,
     set_current_tenant_id,
 )
-from bisheng.permission.application import sql_runtime
+from bisheng.permission.application import control_state, sql_runtime
 from bisheng.permission.application.control_state import (
+    SqlGrantMutationState,
     SqlPermissionControlState,
 )
+from bisheng.permission.application.published_viewers import published_viewer_changes
 from bisheng.permission.application.sql_runtime import (
     SqlProjectionFinalizer,
     SqlProjectionScopeGuard,
@@ -37,6 +40,9 @@ from bisheng.permission.domain.models import (
     PermissionVisibleSourceProjection,
     ResourcePermissionMode,
 )
+from bisheng.permission.domain.repositories.projection_repository import ProjectionRepository
+from bisheng.permission.domain.schemas import VerifiedPermissionTarget
+from bisheng.permission.domain.services.grant_service import CanonicalGrantChange, GrantMutationContext, GrantService
 from bisheng.permission.domain.services.grant_source_service import (
     GrantModelSnapshot,
     GrantSnapshot,
@@ -46,9 +52,11 @@ from bisheng.permission.domain.services.projection_plan import (
     ProjectionPlan,
     ProjectionTupleDelta,
 )
+from bisheng.permission.domain.services.projection_service import ProjectionService
 from bisheng.permission.domain.services.visibility_projection_service import (
     VisibilityProjectionCompiler,
 )
+from test.permission.test_f048_projection_service import FakeFGAProjection, FakeRecentMarker
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +78,7 @@ async def session_factory(
     metadata = sa.MetaData()
     for name in (
         "permission_projection_operation",
+        "permission_projection_tuple",
         "permission_migration_run",
         "permission_migration_item",
         "permission_visible_source_projection",
@@ -88,8 +97,174 @@ async def session_factory(
             yield session
 
     monkeypatch.setattr(sql_runtime, "get_async_db_session", factory)
+    monkeypatch.setattr(control_state, "get_async_db_session", factory)
     yield factory
     await engine.dispose()
+
+
+@pytest.mark.parametrize("resource_type", ["workflow", "assistant"])
+@pytest.mark.parametrize("manual_access", [False, True])
+async def test_published_viewer_repeated_lifecycle_keeps_sql_and_fga_consistent(
+    session_factory, monkeypatch, resource_type, manual_access
+):
+    state = SqlPermissionControlState()
+    monkeypatch.setattr(state, "_assert_catalog_writable", AsyncMock())
+    model = GrantModelSnapshot(model_key="viewer", active=True, action_codes=("visible", "use"), derived_level=1)
+    target = VerifiedPermissionTarget.from_business_service(
+        tenant_id=7, resource_type=resource_type, resource_id="app-cycle", resource_version=0, context_version="cycle"
+    )
+    async with session_factory() as session:
+        async with session.begin():
+            session.add(
+                ResourcePermissionMode(
+                    tenant_id=7,
+                    resource_type=resource_type,
+                    resource_id=target.resource_id,
+                    mode="CUSTOM",
+                    version=0,
+                    projection_state="CURRENT",
+                )
+            )
+    fga = FakeFGAProjection(set())
+    fga.reject_existing_writes = True
+    projection = ProjectionService(
+        repository=ProjectionRepository(session_factory=session_factory),
+        marker=FakeRecentMarker(),
+        scope_guard=SqlProjectionScopeGuard(),
+        fga=fga,
+        finalizer=SqlProjectionFinalizer(),
+    )
+    service = GrantService(
+        source_service=GrantSourceService(), projection=projection, state=SqlGrantMutationState(state)
+    )
+    current_version = 0
+    for index, online in enumerate((True, False, True, False, True, False, True)):
+        target = target.model_copy(update={"resource_version": current_version})
+        context = GrantMutationContext(
+            target=target,
+            current_catalog_release_id=8,
+            store_id="store",
+            model_id="model",
+            operator_id=9,
+            mode="CUSTOM",
+            system_authorized=True,
+            capabilities=(),
+            models=(model,),
+            grants=await state.load_grants(target=target, models=(model,)),
+            existing_visible_sources=await state.load_visible_sources(target=target),
+        )
+        changes = published_viewer_changes(context, group_ids=(9,), online=online)
+        if manual_access and index == 0:
+            manual = GrantSourceService().canonicalize_source(
+                source_id=17, subject_type="user_group", subject_id="9", source_type="USER_GROUP"
+            )
+            changes = (*changes, CanonicalGrantChange(operation="ADD", model_key="viewer", source=manual))
+        changes = await state.restore_inactive_sources(target=target, changes=changes)
+        result = await service.mutate(
+            context,
+            changes=changes,
+            expected_resource_version=current_version,
+            expected_catalog_release_id=8,
+            idempotency_key=f"cycle-{index}",
+        )
+        current_version = result.resource_version
+        async with session_factory() as session:
+            mode = (await session.execute(select(ResourcePermissionMode))).scalars().one()
+            assignees = list((await session.execute(select(PermissionGrantAssignee))).scalars())
+            visible = list((await session.execute(select(PermissionVisibleSourceProjection))).scalars())
+            operations = list((await session.execute(select(PermissionProjectionOperation))).scalars())
+        assert mode.projection_state == "CURRENT"
+        assert all(operation.status == "FINALIZED" for operation in operations)
+        active_sources = {row.id: row.version for row in assignees if row.state == "ACTIVE"}
+        automatic = next(row for row in assignees if row.source_type == "OTHER")
+        assert automatic.version == index + 1
+        assert automatic.state == ("ACTIVE" if online else "INACTIVE")
+        active_visible = {
+            int(row.source_owner_key.removeprefix("grant_assignee:")): row.source_version
+            for row in visible
+            if row.state == "ACTIVE"
+        }
+        assert active_visible == active_sources
+        assert (("user_group:9#member", "visible", f"{resource_type}:app-cycle") in fga.present) == (
+            online or manual_access
+        )
+
+
+async def test_visible_sources_are_loaded_in_one_query_for_a_publication_batch(session_factory, monkeypatch):
+    sources = GrantSourceService()
+    grant = GrantSnapshot(
+        grant_id="g-bulk",
+        tenant_id=7,
+        resource_type="workflow",
+        resource_id="bulk-app",
+        model=GrantModelSnapshot(model_key="viewer", active=True, action_codes=("visible",), derived_level=1),
+        active=True,
+        sources=tuple(
+            sources.canonicalize_source(
+                source_id=index, subject_type="user_group", subject_id=str(index), source_type="USER_GROUP"
+            )
+            for index in range(1, 54)
+        ),
+    )
+    compilation = VisibilityProjectionCompiler().compile(tenant_id=7, grants=(grant,), existing_sources=())
+    async with session_factory() as session:
+        async with session.begin():
+            session.execute = AsyncMock(wraps=session.execute)
+            await SqlPermissionControlState._prepare_visible_sources(
+                session, tenant_id=7, visibility=compilation, operation_id=1
+            )
+            assert session.execute.await_count == 1
+            session.execute.reset_mock()
+            await SqlPermissionControlState._prepare_visible_sources(
+                session, tenant_id=7, visibility=compilation, operation_id=2
+            )
+            assert session.execute.await_count == 1
+        rows = list((await session.execute(select(PermissionVisibleSourceProjection))).scalars())
+    assert len(rows) == 53
+    assert all(row.operation_id == 2 for row in rows)
+    async with session_factory() as session:
+        async with session.begin():
+            session.add(
+                ResourcePermissionMode(
+                    tenant_id=7,
+                    resource_type="workflow",
+                    resource_id="bulk-app",
+                    mode="CUSTOM",
+                    version=0,
+                    projection_state="PROJECTING",
+                    operation_id=2,
+                )
+            )
+            grant_row = await SqlPermissionControlState()._upsert_grant(
+                session, grant=grant, state="PENDING", projection_state="PROJECTING"
+            )
+            for source in grant.sources:
+                await SqlPermissionControlState._upsert_assignee(
+                    session, grant_row=grant_row, source=source, state="PENDING"
+                )
+
+    owner_queries = []
+
+    @asynccontextmanager
+    async def counting_factory():
+        async with session_factory() as session:
+            execute = session.execute
+
+            async def counted_execute(statement, *args, **kwargs):
+                if isinstance(statement, sa.sql.Select) and "JOIN permission_grant" in str(statement):
+                    owner_queries.append(statement)
+                return await execute(statement, *args, **kwargs)
+
+            session.execute = counted_execute
+            yield session
+
+    monkeypatch.setattr(sql_runtime, "get_async_db_session", counting_factory)
+    plan = replace(_plan(), scope_key="workflow:bulk-app", expected_version=0, target_version=1)
+    await SqlProjectionFinalizer().finalize(plan, 2)
+    assert len(owner_queries) == 1
+    async with session_factory() as session:
+        rows = list((await session.execute(select(PermissionVisibleSourceProjection))).scalars())
+    assert all(row.state == "ACTIVE" for row in rows)
 
 
 def _plan() -> ProjectionPlan:
@@ -259,6 +434,21 @@ async def test_resource_scope_reservation_requires_bound_operation(
     assert await guard.is_expected_version(_plan(), operation_id + 1) is False
     with pytest.raises(PermissionPublishNotReadyError):
         await guard.reserve(_plan(), operation_id + 1)
+
+
+@pytest.mark.asyncio
+async def test_source_only_finalizer_keeps_mode_and_converges_pending_sources(session_factory) -> None:
+    operation_id = await _seed_projecting_state(session_factory)
+    plan = replace(_plan(), operation_type="GRANT_MUTATION", deltas=())
+    finalizer = SqlProjectionFinalizer()
+    await finalizer.finalize(plan, operation_id)
+    await finalizer.finalize(plan, operation_id)
+    with bypass_tenant_filter():
+        async with session_factory() as session:
+            mode = (await session.exec(select(ResourcePermissionMode))).one()
+            assignees = (await session.exec(select(PermissionGrantAssignee).order_by(PermissionGrantAssignee.id))).all()
+    assert (mode.version, mode.projection_state, mode.mode) == (4, "CURRENT", "CUSTOM")
+    assert [(row.state, row.version) for row in assignees] == [("ACTIVE", 1), ("INACTIVE", 5)]
 
 
 @pytest.mark.asyncio

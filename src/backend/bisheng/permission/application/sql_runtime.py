@@ -745,6 +745,7 @@ class SqlProjectionFinalizer:
                     .scalars()
                     .all()
                 )
+                owner_ids = {}
                 for source in visible_sources:
                     prefix = "grant_assignee:"
                     if source.source_kind != "GRANT_ASSIGNEE" or not source.source_owner_key.startswith(prefix):
@@ -757,19 +758,23 @@ class SqlProjectionFinalizer:
                         raise PermissionPublishNotReadyError(
                             msg="Visible source recovery owner identity is invalid",
                         ) from exc
-                    canonical_owner = (
+                    owner_ids[source.source_owner_key] = assignee_id
+                canonical_owners = {}
+                assignee_ids = tuple(sorted(set(owner_ids.values())))
+                for offset in range(0, len(assignee_ids), 500):
+                    rows = (
                         await session.execute(
                             select(PermissionGrantAssignee, PermissionGrant)
-                            .join(
-                                PermissionGrant,
-                                PermissionGrant.id == PermissionGrantAssignee.grant_id,
-                            )
+                            .join(PermissionGrant, PermissionGrant.id == PermissionGrantAssignee.grant_id)
                             .where(
                                 PermissionGrantAssignee.tenant_id == plan.tenant_id,
-                                PermissionGrantAssignee.id == assignee_id,
+                                col(PermissionGrantAssignee.id).in_(assignee_ids[offset : offset + 500]),
                             )
                         )
-                    ).first()
+                    ).all()
+                    canonical_owners.update((assignee.id, (assignee, grant)) for assignee, grant in rows)
+                for source in visible_sources:
+                    canonical_owner = canonical_owners.get(owner_ids[source.source_owner_key])
                     if canonical_owner is None:
                         raise PermissionPublishNotReadyError(
                             msg="Visible source recovery canonical owner is missing",

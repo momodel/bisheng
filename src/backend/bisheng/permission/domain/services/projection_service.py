@@ -135,7 +135,11 @@ def restore_projection_plan(
 ) -> ProjectionPlan:
     """Rebuild and checksum-verify one projection plan from durable rows."""
 
-    if operation.id is None or operation.tenant_id is None or not tuple_rows:
+    if (
+        operation.id is None
+        or operation.tenant_id is None
+        or (not tuple_rows and operation.operation_type != "GRANT_MUTATION")
+    ):
         raise PermissionPublishNotReadyError(
             msg="Projection ledger is incomplete",
         )
@@ -150,7 +154,7 @@ def restore_projection_plan(
         )
         for row in tuple_rows
     )
-    for change_item_count in range(0, 51):
+    for change_item_count in range(0 if deltas else 1, 51):
         candidate = ProjectionPlan(
             tenant_id=int(operation.tenant_id),
             idempotency_key=operation.idempotency_key,
@@ -373,10 +377,7 @@ class ProjectionService:
             )
         if len(preview.correction_deltas) > MAX_ATOMIC_TUPLES:
             raise PermissionPublishNotReadyError(
-                msg=(
-                    "FAILED_CLOSED recovery requires more than "
-                    f"{MAX_ATOMIC_TUPLES} atomic tuple corrections"
-                ),
+                msg=(f"FAILED_CLOSED recovery requires more than {MAX_ATOMIC_TUPLES} atomic tuple corrections"),
             )
         if not await self._scope_guard.is_failed_closed_recovery_scope(
             plan,
@@ -405,9 +406,7 @@ class ProjectionService:
         try:
             await self._marker.arm(plan)
             commit_checksum = (
-                await self._write(preview.correction_deltas)
-                if preview.correction_deltas
-                else operation.after_checksum
+                await self._write(preview.correction_deltas) if preview.correction_deltas else operation.after_checksum
             )
         except Exception as exc:
             if not await self._is_after(plan.deltas):
@@ -654,6 +653,9 @@ class ProjectionService:
         self,
         deltas: tuple[ProjectionTupleDelta, ...],
     ) -> str:
+        # Overlapping sources can change the SQL ledger without changing tuples.
+        if not deltas:
+            return sha256(b"[]").hexdigest()
         writes = tuple(delta for delta in deltas if delta.action == "WRITE")
         deletes = tuple(delta for delta in deltas if delta.action == "DELETE")
         return await self._fga.write_atomic(writes=writes, deletes=deletes)
@@ -678,6 +680,8 @@ class ProjectionService:
     ) -> tuple[ProjectionTupleDelta, ...]:
         """Return one exact mutation for every tuple not at terminal AFTER."""
 
+        if not deltas:
+            return ()
         expected = projection_state_expectations(deltas, after=True)
         representatives: dict[tuple[str, str, str], ProjectionTupleDelta] = {}
         for delta in deltas:
@@ -733,6 +737,8 @@ class ProjectionService:
         self,
         deltas: tuple[ProjectionTupleDelta, ...],
     ) -> str:
+        if not deltas:
+            return "AFTER"
         representatives: dict[tuple[str, str, str], ProjectionTupleDelta] = {}
         for delta in deltas:
             representatives.setdefault(delta.key, delta)

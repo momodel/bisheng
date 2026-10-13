@@ -118,7 +118,7 @@ async def update_status(
     *,
     request: Request,
     assistant_id: str = Body(description="Assistant UniqueID", alias="id"),
-    status: int = Body(description="whether to go online: 0 offline, 1 online"),
+    status: int = Body(ge=1, le=2, description="Publication status: 1 offline, 2 online"),
     login_user: UserPayload = Depends(UserPayload.get_login_user),
 ):
     await AssistantService.update_status(request, login_user, assistant_id, status)

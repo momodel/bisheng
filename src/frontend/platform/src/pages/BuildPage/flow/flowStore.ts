@@ -1,9 +1,8 @@
-// @ts-strict-ignore
 import { WorkFlow } from '@/types/flow';
 import { create } from 'zustand';
 
 type State = {
-    flow: WorkFlow
+    flow: WorkFlow | null
     fitView: boolean,
     runCache: {
         [nodeId: string]: {
@@ -13,7 +12,7 @@ type State = {
 }
 
 type Actions = {
-    setFlow: (flowid: WorkFlow) => void;
+    setFlow: (flowid: WorkFlow | null) => void;
     uploadFlow: (file?: File) => void;
     setFitView: () => void;
     // updateNode: (id: string, data: any) => void;
