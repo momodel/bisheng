@@ -54,10 +54,15 @@ class NewApiCredentialService:
 
     @classmethod
     def model_params(cls, params: dict, user_id: int) -> dict:
+        return cls.prepare_model_params(params, user_id)[0]
+
+    @classmethod
+    def prepare_model_params(cls, params: dict, user_id: int) -> tuple[dict, bool]:
+        """Return credentials and whether the personal key was actually installed."""
         base_url = cls.base_url()
         urls = [params[field] for field in _URL_FIELDS if params.get(field)]
         if not base_url or not any(matches_gateway(url, base_url) for url in urls):
-            return dict(params)
+            return dict(params), False
         if not all(matches_gateway(url, base_url) for url in urls):
             raise NewApiBindingConflictError()
         result = dict(params)
@@ -70,7 +75,7 @@ class NewApiCredentialService:
         for field in ("default_headers", "headers"):
             if isinstance(result.get(field), dict):
                 result[field] = cls.auth_headers(result[field], key)
-        return result
+        return result, True
 
     @staticmethod
     def auth_headers(headers: dict, key: str) -> dict:

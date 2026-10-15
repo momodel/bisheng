@@ -95,3 +95,8 @@ class NewApiBindingMissingError(BaseErrorCode):
 class NewApiBindingConflictError(BaseErrorCode):
     Code: int = 10642
     Msg: str = "Personal model key binding conflicts with the configured user or gateway"
+
+
+class NewApiInsufficientCreditsError(BaseErrorCode):
+    Code: int = 10643
+    Msg: str = "积分不足,请联系管理员"

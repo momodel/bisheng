@@ -3,6 +3,27 @@
 import posixpath
 from urllib.parse import unquote, urlsplit
 
+from bisheng.common.errcode.user import NewApiInsufficientCreditsError
+
+
+def check_personal_model_error(error: Exception, personal_key_used: bool) -> None:
+    """Apply the personal billing contract only to NEW API invalid-token responses."""
+    if not personal_key_used or getattr(error, "status_code", None) != 401:
+        return
+    body = getattr(error, "body", None)
+    if not isinstance(body, dict):
+        return
+    details = body.get("error", body)
+    if not isinstance(details, dict):
+        return
+    message = details.get("message", "")
+    if (
+        details.get("type") == "new_api_error"
+        and isinstance(message, str)
+        and (message == "Invalid token" or message.startswith("Invalid token (request id:"))
+    ):
+        raise NewApiInsufficientCreditsError() from error
+
 
 def gateway_identity(url: str) -> tuple[str, str, int, str]:
     if any(ord(char) < 32 for char in url):

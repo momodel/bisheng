@@ -15,13 +15,21 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from cryptography.fernet import Fernet
+from httpx import Request, Response
+from openai import AuthenticationError
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import Field, SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bisheng.common.errcode.user import NewApiBindingConflictError, NewApiBindingMissingError, UserValidateError
-from bisheng.common.utils.newapi import gateway_identity, matches_gateway
+from bisheng.common.errcode.flow import WorkFlowTaskOtherError
+from bisheng.common.errcode.user import (
+    NewApiBindingConflictError,
+    NewApiBindingMissingError,
+    NewApiInsufficientCreditsError,
+    UserValidateError,
+)
+from bisheng.common.utils.newapi import check_personal_model_error, gateway_identity, matches_gateway
 from bisheng.user.domain.models.newapi_binding import NewApiUserBinding
 from bisheng.user.domain.schemas.newapi import NewApiBindingRequest
 
@@ -124,6 +132,16 @@ class CredentialTests(unittest.TestCase):
         )
         self.repository.get.assert_not_called()
 
+    def test_personal_key_marker_tracks_successful_replacement(self):
+        params, used = self.service.prepare_model_params({"base_url": "https://gateway.example/v1"}, 1)
+        self.assertTrue(used)
+        self.assertEqual(params["api_key"], "sk-user-1")
+        _, used = self.service.prepare_model_params({"base_url": "https://other.example/v1"}, 1)
+        self.assertFalse(used)
+        self.settings.get_all_config = lambda: {"newapi_base_url": ""}
+        _, used = self.service.prepare_model_params({"base_url": "https://gateway.example/v1"}, 1)
+        self.assertFalse(used)
+
     def test_missing_binding_and_changed_gateway_fail_closed(self):
         self.repository.get.return_value = None
         self.repository.get.side_effect = None
@@ -195,6 +213,101 @@ class CredentialTests(unittest.TestCase):
         request.gateway_url = "https://other.example"
         with self.assertRaises(NewApiBindingConflictError):
             asyncio.run(self.service.bind(request))
+
+
+def invalid_token_error(*, status=401, error_type="new_api_error", message="Invalid token (request id: example)"):
+    body = {"error": {"code": "", "message": message, "type": error_type}}
+    return AuthenticationError(
+        f"Error code: {status} - {body}",
+        response=Response(status, request=Request("POST", "https://gateway.example/v1/chat/completions")),
+        body=body,
+    )
+
+
+class PersonalModelErrorTests(unittest.TestCase):
+    def test_invalid_token_is_reported_as_insufficient_credits(self):
+        for nested in (True, False):
+            error = invalid_token_error()
+            if not nested:
+                error.body = error.body["error"]
+            with self.subTest(nested=nested), self.assertRaises(NewApiInsufficientCreditsError) as caught:
+                check_personal_model_error(error, True)
+            self.assertIs(caught.exception.__cause__, error)
+            self.assertEqual(caught.exception.to_dict()["status_code"], 10643)
+            # The workflow transports str(error) through Redis before building its response.
+            response = WorkFlowTaskOtherError(exception=str(caught.exception)).to_dict()
+            self.assertEqual(response["data"]["exception"], "积分不足,请联系管理员")
+
+    def test_unrelated_errors_are_not_translated(self):
+        for personal, error in (
+            (False, invalid_token_error()),
+            (True, invalid_token_error(status=403)),
+            (True, invalid_token_error(error_type="authentication_error")),
+            (True, invalid_token_error(message="Upstream channel unavailable")),
+            (True, RuntimeError("Invalid token")),
+        ):
+            with self.subTest(personal=personal, error=error):
+                self.assertIsNone(check_personal_model_error(error, personal))
+
+    def test_all_model_call_wrappers_translate_only_personal_requests(self):
+        stubs = {
+            "bisheng.common.services": module("services", telemetry_service=MagicMock()),
+            "bisheng.common.schemas.telemetry.event_data_schema": module("events", ModelInvokeEventData=MagicMock()),
+            "bisheng.common.services.metric_log": module("metrics", emit_metric=MagicMock()),
+            "bisheng.core.cache.redis_manager": module(
+                "redis", get_redis_client=AsyncMock(), get_redis_client_sync=MagicMock()
+            ),
+            "bisheng.core.logger": module("logger", trace_id_var=MagicMock()),
+            "bisheng.llm.domain.const": module(
+                "const",
+                LLM_CACHE={},
+                LLMModelStatus=SimpleNamespace(NORMAL=SimpleNamespace(value=0), ERROR=SimpleNamespace(value=1)),
+            ),
+        }
+        with patch.dict(sys.modules, stubs):
+            utils = load("newapi_model_utils_test", "bisheng/llm/domain/utils.py")
+        utils.upload_telemetry_log = MagicMock()
+        error = invalid_token_error()
+
+        def call(_self):
+            raise error
+
+        async def async_call(_self):
+            raise error
+
+        def stream(_self):
+            yield "partial"
+            raise error
+
+        async def async_stream(_self):
+            yield "partial"
+            raise error
+
+        async def consume_async_stream(iterator):
+            return [item async for item in iterator]
+
+        for personal in (True, False):
+            model = SimpleNamespace(
+                _personal_model_key_used=personal,
+                server_info=SimpleNamespace(limit_flag=False),
+                model_info=SimpleNamespace(model_type="llm"),
+                sync_update_model_status=MagicMock(),
+                update_model_status=AsyncMock(),
+            )
+            calls = (
+                lambda model=model: utils.wrapper_bisheng_model_limit_check(call)(model),
+                lambda model=model: asyncio.run(utils.wrapper_bisheng_model_limit_check_async(async_call)(model)),
+                lambda model=model: list(utils.wrapper_bisheng_model_generator(stream)(model)),
+                lambda model=model: asyncio.run(
+                    consume_async_stream(utils.wrapper_bisheng_model_generator_async(async_stream)(model))
+                ),
+            )
+            expected = NewApiInsufficientCreditsError if personal else AuthenticationError
+            for index, invoke in enumerate(calls):
+                with self.subTest(personal=personal, wrapper=index), self.assertRaises(expected) as caught:
+                    invoke()
+                if not personal:
+                    self.assertIs(caught.exception, error)
 
 
 class BindingTestUser(SQLModel, table=True):

@@ -1,6 +1,6 @@
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from bisheng.common.constants.enums.telemetry import ApplicationTypeEnum
 from bisheng.user.domain.services.newapi import NewApiCredentialService
@@ -16,6 +16,8 @@ from ..share_fallback import (
 
 class BishengBase(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_by_name=True, validate_by_alias=True)
+
+    _personal_model_key_used: bool = PrivateAttr(default=False)
 
     model_id: int = Field(description="Saved by backend servicemodelUniqueness quantificationID")
     model_name: str = Field(default="", description="model name in mysql")
@@ -92,7 +94,8 @@ class BishengBase(BaseModel):
         return {}
 
     def personal_model_params(self, params: dict) -> dict:
-        return NewApiCredentialService.model_params(params, self.user_id)
+        result, self._personal_model_key_used = NewApiCredentialService.prepare_model_params(params, self.user_id)
+        return result
 
     def get_model_info_config(self):
         if self.model_info and self.model_info.config:

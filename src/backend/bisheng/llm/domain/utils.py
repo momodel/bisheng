@@ -1,7 +1,7 @@
 import functools
 import time
 from datetime import datetime
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -12,9 +12,13 @@ from bisheng.common.constants.enums.telemetry import BaseTelemetryTypeEnum, Stat
 from bisheng.common.schemas.telemetry.event_data_schema import ModelInvokeEventData
 from bisheng.common.services import telemetry_service
 from bisheng.common.services.metric_log import emit_metric
+from bisheng.common.utils.newapi import check_personal_model_error
 from bisheng.core.cache.redis_manager import get_redis_client, get_redis_client_sync
 from bisheng.core.logger import trace_id_var
 from bisheng.llm.domain.const import LLM_CACHE, LLMModelStatus
+
+if TYPE_CHECKING:
+    from bisheng.llm.domain.llm.base import BishengBase
 
 
 def _stringify_reasoning_value(value: Any) -> str:
@@ -278,7 +282,8 @@ def wrapper_bisheng_model_limit_check(func):
             status = LLMModelStatus.ERROR.value
             remark = str(e)
             telemetry_status = StatusEnum.FAILED
-            raise e
+            check_personal_model_error(e, self._personal_model_key_used)
+            raise
         finally:
             end_time = time.time()
             # Avoid blocking the main thread by uploading logs asynchronously using the thread pool
@@ -315,7 +320,8 @@ def wrapper_bisheng_model_limit_check_async(func):
             status = LLMModelStatus.ERROR.value
             remark = str(e)
             telemetry_status = StatusEnum.FAILED
-            raise e
+            check_personal_model_error(e, self._personal_model_key_used)
+            raise
         finally:
             end_time = time.time()
             first_token_cost_time = telemetry_callback.first_token_time if telemetry_callback else 0
@@ -350,7 +356,8 @@ def wrapper_bisheng_model_generator(func):
             status = LLMModelStatus.ERROR.value
             remark = str(e)
             telemetry_status = StatusEnum.FAILED
-            raise e
+            check_personal_model_error(e, self._personal_model_key_used)
+            raise
         finally:
             end_time = time.time()
             upload_telemetry_log(self, start_time, end_time, first_token_cost_time, telemetry_status, True, result=item)
@@ -383,7 +390,8 @@ def wrapper_bisheng_model_generator_async(func):
             status = LLMModelStatus.ERROR.value
             remark = str(e)
             telemetry_status = StatusEnum.FAILED
-            raise e
+            check_personal_model_error(e, self._personal_model_key_used)
+            raise
         finally:
             end_time = time.time()
             upload_telemetry_log(self, start_time, end_time, first_token_cost_time, telemetry_status, True, result=item)
